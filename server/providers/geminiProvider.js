@@ -86,7 +86,7 @@ export async function analyzeVideoWithGemini({ video, duration, request, intent,
     });
 
     // 4. 分析
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
     const analysisPrompt = prompt || `请分析该视频并输出 JSON。识别：${request || "视频内容"}。
 JSON 格式：
 {
