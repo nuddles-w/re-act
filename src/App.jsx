@@ -9,28 +9,30 @@ const formatTime = (value) => {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 };
 
-const buildIntentOptions = () => [
-  { value: "balanced", label: "均衡" },
-  { value: "fast", label: "节奏快" },
-  { value: "slow", label: "节奏慢" },
-];
-
-const buildFocusOptions = () => [
-  { value: "none", label: "不指定" },
-  { value: "face", label: "人物优先" },
-  { value: "action", label: "动作优先" },
-];
-
-const buildTemplateOptions = () => [
-  { value: "general", label: "通用" },
-  { value: "vlog", label: "Vlog" },
-  { value: "sport", label: "运动" },
-  { value: "story", label: "剧情" },
-];
+const applyEditsToTimeline = (timeline, edits) => {
+  if (!timeline) return timeline;
+  if (!edits || edits.length === 0) return timeline;
+  const clips = timeline.clips.map((clip) => {
+    const edit = edits.find(
+      (entry) => entry.start < clip.end && entry.end > clip.start
+    );
+    if (!edit) return { ...clip, playbackRate: 1 };
+    return {
+      ...clip,
+      playbackRate: edit.rate || 1,
+      edit,
+    };
+  });
+  return {
+    ...timeline,
+    clips,
+  };
+};
 
 export default function App() {
   const videoRef = useRef(null);
   const endTimeRef = useRef(null);
+  const chatEndRef = useRef(null);
   const [file, setFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
   const [duration, setDuration] = useState(0);
@@ -38,6 +40,29 @@ export default function App() {
   const [intent, setIntent] = useState(defaultIntent);
   const [timeline, setTimeline] = useState(null);
   const [activeClipId, setActiveClipId] = useState(null);
+  const [analysisStatus, setAnalysisStatus] = useState("idle");
+  const [analysisSource, setAnalysisSource] = useState("local");
+  const [userRequest, setUserRequest] = useState("识别视频中鸡蛋被捣碎的时间起始点");
+  const [pe, setPe] = useState("短视频剪辑产品经理（PE）");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [playheadTime, setPlayheadTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const isDraggingRef = useRef(false);
+  const timelineRef = useRef(null);
+  const [thumbnails, setThumbnails] = useState([]);
+  const [thumbnailStatus, setThumbnailStatus] = useState("idle");
+  const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
+
+  const appendChatMessage = (message) => {
+    setChatMessages((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, ...message },
+    ]);
+  };
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
 
   useEffect(() => {
     return () => {
@@ -47,8 +72,68 @@ export default function App() {
 
   useEffect(() => {
     if (!features) return;
-    setTimeline(buildTimeline(features, intent));
+    const baseTimeline = buildTimeline(features, intent);
+    setTimeline(applyEditsToTimeline(baseTimeline, features.edits || []));
   }, [features, intent]);
+
+  useEffect(() => {
+    if (!videoUrl || !duration) {
+      setThumbnails([]);
+      setThumbnailStatus("idle");
+      return;
+    }
+    let cancelled = false;
+    const video = document.createElement("video");
+    video.src = videoUrl;
+    video.muted = true;
+    video.playsInline = true;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const captureAt = (time) =>
+      new Promise((resolve, reject) => {
+        const onSeeked = () => {
+          try {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL("image/jpeg", 0.7));
+          } catch (error) {
+            reject(error);
+          }
+        };
+        video.currentTime = time;
+        video.addEventListener("seeked", onSeeked, { once: true });
+      });
+
+    const run = async () => {
+      setThumbnailStatus("loading");
+      await new Promise((resolve) => {
+        if (video.readyState >= 1) {
+          resolve();
+          return;
+        }
+        video.addEventListener("loadedmetadata", resolve, { once: true });
+      });
+      const count = 25;
+      const results = [];
+      for (let i = 0; i < count; i += 1) {
+        const time = Math.min(duration - 0.05, (duration / count) * i + 0.1);
+        try {
+          const image = await captureAt(time);
+          if (!cancelled) results.push({ time, image });
+        } catch (error) {
+          if (!cancelled) results.push({ time, image: "" });
+        }
+      }
+      if (!cancelled) {
+        setThumbnails(results);
+        setThumbnailStatus("done");
+      }
+    };
+
+    run();
+    return () => { cancelled = true; };
+  }, [videoUrl, duration]);
 
   const handleFileChange = (event) => {
     const nextFile = event.target.files[0];
@@ -66,11 +151,6 @@ export default function App() {
     if (!videoRef.current || !file) return;
     const nextDuration = videoRef.current.duration || 0;
     setDuration(nextDuration);
-    setFeatures(extractFeaturesFromVideo(file, nextDuration));
-  };
-
-  const handleIntentChange = (field, value) => {
-    setIntent((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleClipPlay = (clip) => {
@@ -78,231 +158,328 @@ export default function App() {
     setActiveClipId(clip.id);
     endTimeRef.current = clip.end;
     videoRef.current.currentTime = clip.start;
+    videoRef.current.playbackRate = clip.playbackRate || 1;
     videoRef.current.play();
+    setPlayheadTime(clip.start);
   };
 
   const handleTimeUpdate = () => {
-    if (!videoRef.current || endTimeRef.current == null) return;
-    if (videoRef.current.currentTime >= endTimeRef.current - 0.05) {
+    if (!videoRef.current) return;
+    setPlayheadTime(videoRef.current.currentTime);
+    
+    if (endTimeRef.current != null && videoRef.current.currentTime >= endTimeRef.current - 0.05) {
       videoRef.current.pause();
+      setIsPlaying(false);
+      videoRef.current.playbackRate = 1;
       endTimeRef.current = null;
     }
   };
 
-  const intentOptions = useMemo(buildIntentOptions, []);
-  const focusOptions = useMemo(buildFocusOptions, []);
-  const templateOptions = useMemo(buildTemplateOptions, []);
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
 
-  const handleExportTimeline = () => {
-    if (!timeline || !features) return;
-    const payload = {
-      intent,
-      features: {
-        duration: features.duration,
-        segmentCount: features.segmentCount,
-        rhythmScore: features.rhythmScore,
-      },
-      timeline,
-      exportedAt: new Date().toISOString(),
+  const handleTimelineScrub = (e) => {
+    if (!duration || !timelineRef.current || !videoRef.current) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    const newTime = percentage * duration;
+    videoRef.current.currentTime = newTime;
+    setPlayheadTime(newTime);
+  };
+
+  const handleTimelineMouseDown = (e) => {
+    isDraggingRef.current = true;
+    handleTimelineScrub(e);
+  };
+
+  useEffect(() => {
+    const handleGlobalMouseMove = (e) => {
+      if (isDraggingRef.current) {
+        handleTimelineScrub(e);
+      }
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
+    const handleGlobalMouseUp = () => {
+      isDraggingRef.current = false;
+    };
+
+    window.addEventListener("mousemove", handleGlobalMouseMove);
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleGlobalMouseMove);
+      window.removeEventListener("mouseup", handleGlobalMouseUp);
+    };
+  }, [duration]);
+
+  const handleEventPreview = (event) => {
+    if (!videoRef.current) return;
+    setActiveClipId(null);
+    endTimeRef.current = event.end;
+    videoRef.current.currentTime = event.start;
+    videoRef.current.play();
+    setPlayheadTime(event.start);
+  };
+
+  const analyzeVideo = async () => {
+    if (!file || !duration) return;
+    setAnalysisStatus("analyzing");
+    setChatMessages([]);
+    appendChatMessage({
+      role: "user",
+      time: new Date().toLocaleTimeString(),
+      message: userRequest,
     });
+    
+    try {
+      const formData = new FormData();
+      formData.append("video", file);
+      formData.append("duration", String(duration));
+      formData.append("request", userRequest);
+      formData.append("pe", pe);
+
+      const response = await fetch(`${apiBase}/api/analyze`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Backend error");
+
+      const data = await response.json();
+      if (Array.isArray(data.debugTimeline)) {
+        data.debugTimeline.forEach((entry) => {
+          appendChatMessage({
+            role: "system",
+            time: new Date().toLocaleTimeString(),
+            message: entry.message,
+          });
+        });
+      }
+      
+      setFeatures(data.features);
+      setAnalysisSource(data.source || "server");
+      setAnalysisStatus("done");
+      
+      appendChatMessage({
+        role: "assistant",
+        time: new Date().toLocaleTimeString(),
+        message: `识别完成！找到 ${data.features?.events?.length || 0} 个事件和 ${data.features?.segments?.length || 0} 个片段。`,
+      });
+    } catch (error) {
+      const fallback = extractFeaturesFromVideo(file, duration);
+      setFeatures(fallback);
+      setAnalysisSource("local");
+      setAnalysisStatus("error");
+      appendChatMessage({
+        role: "system",
+        time: new Date().toLocaleTimeString(),
+        message: "识别异常，已切换为本地基础解析。",
+      });
+    }
+  };
+
+  const handleExport = () => {
+    if (!timeline) return;
+    const blob = new Blob([JSON.stringify({ timeline, features }, null, 2)], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `${file?.name || "video"}-timeline.json`;
-    document.body.appendChild(link);
+    link.download = "timeline-export.json";
     link.click();
-    link.remove();
-    URL.revokeObjectURL(link.href);
   };
 
   return (
-    <div className="app">
-      <header className="app__header">
-        <div>
-          <h1>React 视频剪辑架构</h1>
-          <p>基于视频特征与用户诉求生成剪辑时间线</p>
+    <div className="capcut-editor">
+      <header className="editor-header">
+        <div className="header-left">
+          <div className="app-logo">C</div>
+          <nav className="header-nav">
+            <span>Transcript</span>
+            <span className="active">Media</span>
+          </nav>
         </div>
-        <label className="upload">
-          上传视频
-          <input type="file" accept="video/*" onChange={handleFileChange} />
-        </label>
+        <div className="header-center">
+          项目识别 - {file?.name || "未命名"}
+        </div>
+        <div className="header-right">
+          <button className="btn-export" onClick={handleExport} disabled={!timeline}>Export</button>
+          <div className="user-avatar">👤</div>
+        </div>
       </header>
 
-      <main className="app__content">
-        <section className="panel">
-          <h2>预览与诉求</h2>
-          <div className="video-card">
+      <main className="editor-content">
+        <aside className="editor-sidebar">
+          <div className="sidebar-top">
+            <div className="section-title">Transcript</div>
+            <div className="chat-container">
+              {chatMessages.map((msg) => (
+                <div key={msg.id} className={`chat-message ${msg.role}`}>
+                  <div className="msg-header">
+                    <span className="msg-role">{msg.role === 'user' ? 'Me' : 'AI'}</span>
+                    <span className="msg-time">{msg.time}</span>
+                  </div>
+                  <div className="msg-content">{msg.message}</div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+          </div>
+
+          <div className="sidebar-middle">
+            <div className="section-title">Media</div>
+            <div className="media-grid">
+              {file ? (
+                <div className="media-card">
+                  <div className="media-preview">
+                    {thumbnails[0] ? <img src={thumbnails[0].image} alt="preview" /> : <div className="placeholder" />}
+                    <span className="media-duration">{formatTime(duration)}</span>
+                  </div>
+                  <div className="media-info">{file.name}</div>
+                </div>
+              ) : (
+                <div className="empty-media">暂无素材</div>
+              )}
+            </div>
+          </div>
+
+          <div className="sidebar-bottom">
+            <div className="pe-input-area">
+              <input 
+                type="text" 
+                value={pe} 
+                onChange={(e) => setPe(e.target.value)} 
+                placeholder="Persona/PE: 剪辑产品经理..."
+              />
+            </div>
+            <div className="prompt-input-area">
+              <textarea 
+                value={userRequest}
+                onChange={(e) => setUserRequest(e.target.value)}
+                placeholder="Ask Gemini what changes to make..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    analyzeVideo();
+                  }
+                }}
+              />
+              <button className="btn-send" onClick={analyzeVideo} disabled={!file || analysisStatus === 'analyzing'}>
+                {analysisStatus === 'analyzing' ? '...' : '↑'}
+              </button>
+            </div>
+            <div className="add-video-btn">
+              <label className="upload-label">
+                + 添加视频
+                <input type="file" accept="video/*" onChange={handleFileChange} />
+              </label>
+            </div>
+          </div>
+        </aside>
+
+        <section className="editor-preview">
+          <div className="preview-container">
             {videoUrl ? (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                controls
+              <video 
+                ref={videoRef} 
+                src={videoUrl} 
                 onLoadedMetadata={handleMetadataLoaded}
                 onTimeUpdate={handleTimeUpdate}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
               />
             ) : (
-              <div className="video-placeholder">请选择一个视频文件</div>
+              <div className="preview-placeholder">上传视频以开始</div>
             )}
-            <div className="intent">
-              <div className="field">
-                <label>目标时长（秒）</label>
-                <input
-                  type="number"
-                  min="5"
-                  max={Math.ceil(duration || 60)}
-                  value={intent.targetDuration}
-                  onChange={(event) =>
-                    handleIntentChange("targetDuration", Number(event.target.value))
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>剪辑节奏</label>
-                <select
-                  value={intent.style}
-                  onChange={(event) => handleIntentChange("style", event.target.value)}
-                >
-                  {intentOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>关注主体</label>
-                <select
-                  value={intent.focus}
-                  onChange={(event) => handleIntentChange("focus", event.target.value)}
-                >
-                  {focusOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>剪辑模板</label>
-                <select
-                  value={intent.template}
-                  onChange={(event) => handleIntentChange("template", event.target.value)}
-                >
-                  {templateOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={intent.keepStart}
-                    onChange={(event) =>
-                      handleIntentChange("keepStart", event.target.checked)
-                    }
-                  />
-                  保留开场
-                </label>
-              </div>
-              <div className="field checkbox">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={intent.keepEnd}
-                    onChange={(event) =>
-                      handleIntentChange("keepEnd", event.target.checked)
-                    }
-                  />
-                  保留结尾
-                </label>
-              </div>
-              <div className="field hint">
-                {features ? (
-                  <span>
-                    已解析 {features.segmentCount} 个片段，总时长{" "}
-                    {formatTime(features.duration)}
-                  </span>
-                ) : (
-                  <span>等待视频解析</span>
+          </div>
+          <div className="preview-controls">
+            <button className="btn-play-pause" onClick={togglePlay} disabled={!videoUrl}>
+              {isPlaying ? "⏸" : "▶️"}
+            </button>
+            <span className="time-display">{formatTime(playheadTime)} / {formatTime(duration)}</span>
+          </div>
+        </section>
+      </main>
+
+      <footer className="editor-timeline">
+        <div className="timeline-toolbar">
+          <div className="toolbar-left">
+            <button className="tool-btn">✂️</button>
+            <button className="tool-btn">↶</button>
+            <button className="tool-btn">↷</button>
+          </div>
+          <div className="toolbar-right">
+            <span>100%</span>
+          </div>
+        </div>
+
+        <div 
+          className="timeline-container" 
+          ref={timelineRef}
+          onMouseDown={handleTimelineMouseDown}
+        >
+          <div className="timeline-ruler">
+            {/* Simple ruler markers */}
+            {Array.from({ length: 10 }).map((_, i) => (
+              <span key={i} className="ruler-mark" style={{ left: `${i * 10}%` }}>
+                {formatTime((duration / 10) * i)}
+              </span>
+            ))}
+            <div 
+              className="timeline-playhead" 
+              style={{ left: `${(playheadTime / (duration || 1)) * 100}%` }}
+            />
+          </div>
+
+          <div className="timeline-tracks">
+            <div className="track track-v1">
+              <div className="track-id">V1</div>
+              <div className="track-content">
+                {file && (
+                  <div className="video-clip-bar">
+                    <div className="thumb-strip">
+                      {thumbnails.map((t, i) => (
+                        <img key={i} src={t.image} alt="" />
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
-          </div>
-        </section>
 
-        <section className="panel">
-          <h2>剪辑时间线</h2>
-          {timeline ? (
-            <>
-              <div className="timeline-summary">
-                <span>目标时长：{formatTime(timeline.targetDuration)}</span>
-                <span>已选片段：{timeline.clips.length}</span>
-                <span>累计时长：{formatTime(timeline.totalDuration)}</span>
-                <button type="button" className="action" onClick={handleExportTimeline}>
-                  导出剪辑方案
-                </button>
-              </div>
-              <div className="clip-list">
-                {timeline.clips.map((clip) => (
-                  <button
-                    key={clip.id}
-                    type="button"
-                    className={clip.id === activeClipId ? "clip active" : "clip"}
-                    onClick={() => handleClipPlay(clip)}
+            <div className="track track-events">
+              <div className="track-id">E1</div>
+              <div className="track-content">
+                {features?.events?.map((ev, i) => (
+                  <div 
+                    key={i} 
+                    className="event-node"
+                    style={{ 
+                      left: `${(ev.start / duration) * 100}%`,
+                      width: `${((ev.end - ev.start) / duration) * 100}%`
+                    }}
+                    onClick={() => handleEventPreview(ev)}
+                    title={ev.label}
                   >
-                    <div>
-                      {formatTime(clip.start)} - {formatTime(clip.end)}
-                    </div>
-                    <div className="clip-meta">
-                      <span>能量 {clip.energy.toFixed(2)}</span>
-                      <span>{clip.reason}</span>
-                    </div>
-                  </button>
+                    {ev.label}
+                  </div>
                 ))}
               </div>
-            </>
-          ) : (
-            <div className="empty">请上传视频后生成时间线</div>
-          )}
-        </section>
-
-        <section className="panel">
-          <h2>特征概览</h2>
-          {features ? (
-            <div className="feature-grid">
-              <div className="feature-card summary">
-                <div className="feature-time">全局特征</div>
-                <div className="feature-tags">
-                  <span>节奏指数 {features.rhythmScore.toFixed(2)}</span>
-                  <span>片段数 {features.segmentCount}</span>
-                </div>
-              </div>
-              {features.segments.map((segment) => (
-                <div key={segment.id} className="feature-card">
-                  <div className="feature-time">
-                    {formatTime(segment.start)} - {formatTime(segment.end)}
-                  </div>
-                  <div className="feature-tags">
-                    <span>能量 {segment.energy.toFixed(2)}</span>
-                    <span>{segment.tags.hasFace ? "有人物" : "无人物"}</span>
-                    <span>{segment.tags.hasAction ? "有动作" : "无动作"}</span>
-                    <span>{segment.tags.hasDialogue ? "有对白" : "无对白"}</span>
-                    <span>运动 {segment.tags.motionScore.toFixed(2)}</span>
-                    <span>对白密度 {segment.tags.speechDensity.toFixed(2)}</span>
-                  </div>
-                </div>
-              ))}
             </div>
-          ) : (
-            <div className="empty">等待生成特征</div>
-          )}
-        </section>
-      </main>
+
+            <div className="track track-a1">
+              <div className="track-id">A1</div>
+              <div className="track-content">
+                <div className="waveform-placeholder" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

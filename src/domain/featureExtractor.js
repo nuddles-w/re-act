@@ -54,5 +54,7 @@ export const extractFeaturesFromVideo = (file, duration) => {
     segments,
     keyframes,
     rhythmScore: Number(rhythmScore.toFixed(2)),
+    events: [],
+    edits: [],
   };
 };
