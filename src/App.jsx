@@ -9,23 +9,104 @@ const formatTime = (value) => {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 };
 
-const applyEditsToTimeline = (timeline, edits) => {
+const applyEditsToTimeline = (timeline, edits, totalDuration = 0) => {
   if (!timeline) return timeline;
   if (!edits || edits.length === 0) return timeline;
-  const clips = timeline.clips.map((clip) => {
-    const edit = edits.find(
-      (entry) => entry.start < clip.end && entry.end > clip.start
+
+  // 如果当前没有片段（比如分析前或 Agent 未返回片段），则创建一个覆盖全时长的基础片段
+  let currentClips = timeline.clips && timeline.clips.length > 0 
+    ? [...timeline.clips] 
+    : [{ 
+        start: 0, 
+        end: totalDuration, 
+        duration: totalDuration, 
+        id: 'base-clip', 
+        energy: 0.5, 
+        label: 'Original Video' 
+      }];
+
+  // 1. 物理分割阶段：根据 edits 中的时间点，将现有片段切碎
+  const splitPoints = new Set();
+  edits.forEach(edit => {
+    if (edit.start != null && edit.start > 0) splitPoints.add(Number(edit.start.toFixed(2)));
+    if (edit.end != null && edit.end > 0) splitPoints.add(Number(edit.end.toFixed(2)));
+  });
+
+  // 按照时间排序分割点
+  const sortedPoints = Array.from(splitPoints).sort((a, b) => a - b);
+
+  sortedPoints.forEach(point => {
+    const newClips = [];
+    currentClips.forEach(clip => {
+      // 使用更宽松的阈值 (0.1s) 来避免过碎的片段，同时处理浮点数精度
+      if (point > clip.start + 0.1 && point < clip.end - 0.1) {
+        // 分裂成两个片段
+        newClips.push(
+          { 
+            ...clip, 
+            end: point, 
+            duration: point - clip.start, 
+            id: `split-${clip.start.toFixed(2)}-${point.toFixed(2)}` 
+          },
+          { 
+            ...clip, 
+            start: point, 
+            duration: clip.end - point, 
+            id: `split-${point.toFixed(2)}-${clip.end.toFixed(2)}` 
+          }
+        );
+      } else {
+        newClips.push(clip);
+      }
+    });
+    currentClips = newClips;
+  });
+
+  // 2. 属性应用阶段：为落在 edit 范围内的片段应用倍速等属性
+  const finalClips = currentClips.map(clip => {
+    // 寻找覆盖该片段的 edit（优先找变速 edit）
+    // 使用 0.2s 的容错区间，确保即使分割点略有偏差也能匹配上
+    const speedEdit = edits.find(e => 
+      e.type === 'speed' && 
+      e.start <= clip.start + 0.2 && 
+      e.end >= clip.end - 0.2
     );
+
+    const splitEdit = edits.find(e => 
+      e.type === 'split' && 
+      e.start <= clip.start + 0.2 && 
+      e.end >= clip.end - 0.2
+    );
+
+    const edit = speedEdit || splitEdit;
+
     if (!edit) return { ...clip, playbackRate: 1 };
+
     return {
       ...clip,
       playbackRate: edit.rate || 1,
       edit,
     };
   });
+
+  // 3. 计算轨道显示时间阶段：根据倍率缩放片段长度
+  let currentTimelineTime = 0;
+  const clipsWithTimelinePositions = finalClips.map(clip => {
+    const playbackRate = clip.playbackRate || 1;
+    const displayDuration = clip.duration / playbackRate;
+    const timelineClip = {
+      ...clip,
+      timelineStart: currentTimelineTime,
+      displayDuration: displayDuration,
+    };
+    currentTimelineTime += displayDuration;
+    return timelineClip;
+  });
+
   return {
     ...timeline,
-    clips,
+    clips: clipsWithTimelinePositions,
+    totalTimelineDuration: currentTimelineTime
   };
 };
 
@@ -47,6 +128,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState([]);
   const [playheadTime, setPlayheadTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isMock, setIsMock] = useState(false);
   const isDraggingRef = useRef(false);
   const timelineRef = useRef(null);
   const [thumbnails, setThumbnails] = useState([]);
@@ -73,8 +155,8 @@ export default function App() {
   useEffect(() => {
     if (!features) return;
     const baseTimeline = buildTimeline(features, intent);
-    setTimeline(applyEditsToTimeline(baseTimeline, features.edits || []));
-  }, [features, intent]);
+    setTimeline(applyEditsToTimeline(baseTimeline, features.edits || [], duration));
+  }, [features, intent, duration]);
 
   useEffect(() => {
     if (!videoUrl || !duration) {
@@ -163,11 +245,54 @@ export default function App() {
     setPlayheadTime(clip.start);
   };
 
+  // 转换函数：素材时间 -> 轨道时间
+  const mediaToTimeline = (mTime) => {
+    if (!timeline || !timeline.clips) return mTime;
+    const clip = timeline.clips.find(c => mTime >= c.start - 0.01 && mTime <= c.end + 0.01);
+    if (!clip) return mTime;
+    const offsetInClip = mTime - clip.start;
+    return clip.timelineStart + (offsetInClip / (clip.playbackRate || 1));
+  };
+
+  // 转换函数：轨道时间 -> 素材时间
+  const timelineToMedia = (tTime) => {
+    if (!timeline || !timeline.clips) return tTime;
+    const clip = timeline.clips.find(c => tTime >= c.timelineStart - 0.01 && tTime <= c.timelineStart + c.displayDuration + 0.01);
+    if (!clip) return tTime;
+    const offsetInTimeline = tTime - clip.timelineStart;
+    return clip.start + (offsetInTimeline * (clip.playbackRate || 1));
+  };
+
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
-    setPlayheadTime(videoRef.current.currentTime);
+    const currentTime = videoRef.current.currentTime;
     
-    if (endTimeRef.current != null && videoRef.current.currentTime >= endTimeRef.current - 0.05) {
+    // 更新轨道上的播放头位置（转换为轨道时间）
+    setPlayheadTime(mediaToTimeline(currentTime));
+    
+    // 动态倍率同步逻辑
+    if (timeline && timeline.clips) {
+      const currentClip = timeline.clips.find(
+        clip => currentTime >= clip.start - 0.05 && currentTime <= clip.end + 0.05
+      );
+      
+      if (currentClip) {
+        const targetRate = currentClip.playbackRate || 1;
+        if (videoRef.current.playbackRate !== targetRate) {
+          videoRef.current.playbackRate = targetRate;
+        }
+        if (activeClipId !== currentClip.id) {
+          setActiveClipId(currentClip.id);
+        }
+      } else {
+        if (videoRef.current.playbackRate !== 1) {
+          videoRef.current.playbackRate = 1;
+        }
+        setActiveClipId(null);
+      }
+    }
+
+    if (endTimeRef.current != null && currentTime >= endTimeRef.current - 0.05) {
       videoRef.current.pause();
       setIsPlaying(false);
       videoRef.current.playbackRate = 1;
@@ -180,19 +305,32 @@ export default function App() {
     if (isPlaying) {
       videoRef.current.pause();
     } else {
+      // 开始播放前预设正确的倍率
+      if (timeline && timeline.clips) {
+        const currentTime = videoRef.current.currentTime;
+        const currentClip = timeline.clips.find(
+          clip => currentTime >= clip.start - 0.05 && currentTime <= clip.end + 0.05
+        );
+        if (currentClip) {
+          videoRef.current.playbackRate = currentClip.playbackRate || 1;
+        }
+      }
       videoRef.current.play();
     }
     setIsPlaying(!isPlaying);
   };
 
   const handleTimelineScrub = (e) => {
-    if (!duration || !timelineRef.current || !videoRef.current) return;
+    if (!timeline || !timeline.totalTimelineDuration || !timelineRef.current || !videoRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const percentage = Math.max(0, Math.min(1, x / rect.width));
-    const newTime = percentage * duration;
-    videoRef.current.currentTime = newTime;
-    setPlayheadTime(newTime);
+    
+    const targetTimelineTime = percentage * timeline.totalTimelineDuration;
+    const targetMediaTime = timelineToMedia(targetTimelineTime);
+    
+    videoRef.current.currentTime = targetMediaTime;
+    setPlayheadTime(targetTimelineTime);
   };
 
   const handleTimelineMouseDown = (e) => {
@@ -243,6 +381,7 @@ export default function App() {
       formData.append("duration", String(duration));
       formData.append("request", userRequest);
       formData.append("pe", pe);
+      formData.append("isMock", isMock.toString());
 
       const response = await fetch(`${apiBase}/api/analyze`, {
         method: "POST",
@@ -262,14 +401,35 @@ export default function App() {
         });
       }
       
-      setFeatures(data.features);
+      setFeatures(prev => ({
+        ...data.features,
+        // 如果新结果里没有片段，保留之前的片段特征
+        segments: (data.features.segments && data.features.segments.length > 0) 
+          ? data.features.segments 
+          : (prev?.segments || [])
+      }));
       setAnalysisSource(data.source || "server");
       setAnalysisStatus("done");
       
+      // 展示 Agent 的推理过程
+      if (data.features?.agentSteps) {
+        data.features.agentSteps.forEach((step, index) => {
+          appendChatMessage({
+            role: "system",
+            time: new Date().toLocaleTimeString(),
+            message: `[Step ${index + 1}] 思考: ${step.thought}\n执行动作: ${step.action}`,
+          });
+        });
+      }
+
+      const summaryMessage = data.features?.summary 
+        ? data.features.summary 
+        : `识别完成！找到 ${data.features?.events?.length || 0} 个事件和 ${data.features?.segments?.length || 0} 个片段。`;
+
       appendChatMessage({
         role: "assistant",
         time: new Date().toLocaleTimeString(),
-        message: `识别完成！找到 ${data.features?.events?.length || 0} 个事件和 ${data.features?.segments?.length || 0} 个片段。`,
+        message: summaryMessage,
       });
 
       if (data.rawResponse) {
@@ -280,14 +440,18 @@ export default function App() {
         });
       }
     } catch (error) {
+      const isQuotaError = error.message?.includes("429") || error.message?.includes("quota");
       const fallback = extractFeaturesFromVideo(file, duration);
       setFeatures(fallback);
       setAnalysisSource("local");
       setAnalysisStatus("error");
+      
       appendChatMessage({
         role: "system",
         time: new Date().toLocaleTimeString(),
-        message: "识别异常，已切换为本地基础解析。",
+        message: isQuotaError 
+          ? "⚠️ Gemini API 配额已耗尽（429）。建议勾选下方“Mock 调试模式”继续验证 UI 逻辑。"
+          : "识别异常，已切换为本地基础解析。",
       });
     }
   };
@@ -364,6 +528,16 @@ export default function App() {
                 placeholder="Persona/PE: 剪辑产品经理..."
               />
             </div>
+            <div className="debug-mock-mode">
+              <label>
+                <input 
+                  type="checkbox" 
+                  checked={isMock} 
+                  onChange={(e) => setIsMock(e.target.checked)} 
+                />
+                Mock 调试模式 (跳过视频处理)
+              </label>
+            </div>
             <div className="prompt-input-area">
               <textarea 
                 value={userRequest}
@@ -392,14 +566,22 @@ export default function App() {
         <section className="editor-preview">
           <div className="preview-container">
             {videoUrl ? (
-              <video 
-                ref={videoRef} 
-                src={videoUrl} 
-                onLoadedMetadata={handleMetadataLoaded}
-                onTimeUpdate={handleTimeUpdate}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-              />
+              <>
+                <video 
+                  ref={videoRef} 
+                  src={videoUrl} 
+                  onLoadedMetadata={handleMetadataLoaded}
+                  onTimeUpdate={handleTimeUpdate}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onClick={togglePlay}
+                />
+                {videoRef.current && videoRef.current.playbackRate !== 1 && (
+                  <div className="playback-speed-overlay">
+                    {videoRef.current.playbackRate}x
+                  </div>
+                )}
+              </>
             ) : (
               <div className="preview-placeholder">上传视频以开始</div>
             )}
@@ -408,7 +590,7 @@ export default function App() {
             <button className="btn-play-pause" onClick={togglePlay} disabled={!videoUrl}>
               {isPlaying ? "⏸" : "▶️"}
             </button>
-            <span className="time-display">{formatTime(playheadTime)} / {formatTime(duration)}</span>
+            <span className="time-display">{formatTime(playheadTime)} / {formatTime(timeline?.totalTimelineDuration || duration)}</span>
           </div>
         </section>
       </main>
@@ -434,12 +616,12 @@ export default function App() {
             {/* Simple ruler markers */}
             {Array.from({ length: 10 }).map((_, i) => (
               <span key={i} className="ruler-mark" style={{ left: `${i * 10}%` }}>
-                {formatTime((duration / 10) * i)}
+                {formatTime(((timeline?.totalTimelineDuration || duration) / 10) * i)}
               </span>
             ))}
             <div 
               className="timeline-playhead" 
-              style={{ left: `${(playheadTime / (duration || 1)) * 100}%` }}
+              style={{ left: `${(playheadTime / (timeline?.totalTimelineDuration || duration || 1)) * 100}%` }}
             />
           </div>
 
@@ -447,7 +629,36 @@ export default function App() {
             <div className="track track-v1">
               <div className="track-id">V1</div>
               <div className="track-content">
-                {file && (
+                {timeline && timeline.clips && timeline.clips.length > 0 ? (
+                  timeline.clips.map((clip, i) => (
+                    <div 
+                      key={clip.id}
+                      className={`video-clip-segment ${activeClipId === clip.id ? 'active' : ''}`}
+                      style={{ 
+                        left: `${(clip.timelineStart / timeline.totalTimelineDuration) * 100}%`,
+                        width: `${(clip.displayDuration / timeline.totalTimelineDuration) * 100}%`,
+                        opacity: clip.playbackRate !== 1 ? 0.8 : 1
+                      }}
+                      onClick={() => handleClipPlay(clip)}
+                    >
+                      <div className="clip-thumb-overlay">
+                        {thumbnails.length > 0 ? (
+                          thumbnails
+                            .filter(t => t.time >= clip.start - 0.5 && t.time <= clip.end + 0.5)
+                            .slice(0, 5) // 限制每个片段显示的缩略图数量，避免性能问题
+                            .map((t, idx) => (
+                              <img key={idx} src={t.image} alt="" />
+                            ))
+                        ) : null}
+                      </div>
+                      {clip.playbackRate && clip.playbackRate !== 1 && (
+                        <div className="clip-speed-tag">⚡ {clip.playbackRate}x</div>
+                      )}
+                      <div className="clip-label">{`Clip ${i+1}`}</div>
+                      {clip.edit && <div className="clip-edit-reason">{clip.edit.type}</div>}
+                    </div>
+                  ))
+                ) : file ? (
                   <div className="video-clip-bar">
                     <div className="thumb-strip">
                       {thumbnails.map((t, i) => (
@@ -455,27 +666,32 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
 
             <div className="track track-events">
               <div className="track-id">E1</div>
               <div className="track-content">
-                {features?.events?.map((ev, i) => (
-                  <div 
-                    key={i} 
-                    className="event-node"
-                    style={{ 
-                      left: `${(ev.start / duration) * 100}%`,
-                      width: `${((ev.end - ev.start) / duration) * 100}%`
-                    }}
-                    onClick={() => handleEventPreview(ev)}
-                    title={ev.label}
-                  >
-                    {ev.label}
-                  </div>
-                ))}
+                {features?.events?.map((ev, i) => {
+                  const tStart = mediaToTimeline(ev.start);
+                  const tEnd = mediaToTimeline(ev.end);
+                  const tDuration = timeline?.totalTimelineDuration || duration;
+                  return (
+                    <div 
+                      key={i} 
+                      className="event-node"
+                      style={{ 
+                        left: `${(tStart / tDuration) * 100}%`,
+                        width: `${((tEnd - tStart) / tDuration) * 100}%`
+                      }}
+                      onClick={() => handleEventPreview(ev)}
+                      title={ev.label}
+                    >
+                      {ev.label}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 

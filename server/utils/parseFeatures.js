@@ -106,6 +106,36 @@ export const parseFeatures = (text, durationLimit = 0) => {
     }))
     .filter(ev => !isNaN(ev.start) && !isNaN(ev.end));
 
+  const edits = Array.isArray(payload.edits) ? [...payload.edits] : [];
+
+  // 增强逻辑：从 agentSteps (Re-Act 过程) 中提取潜在的工具调用
+  if (Array.isArray(payload.steps)) {
+    payload.steps.forEach(step => {
+      if (!step.action) return;
+      
+      // 提取 split_video(start, end)
+      const splitMatch = step.action.match(/split_video\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/i);
+      if (splitMatch) {
+        edits.push({
+          type: "split",
+          start: parseFloat(splitMatch[1]),
+          end: parseFloat(splitMatch[2])
+        });
+      }
+
+      // 提取 adjust_speed(start, end, rate)
+      const speedMatch = step.action.match(/adjust_speed\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/i);
+      if (speedMatch) {
+        edits.push({
+          type: "speed",
+          start: parseFloat(speedMatch[1]),
+          end: parseFloat(speedMatch[2]),
+          rate: parseFloat(speedMatch[3])
+        });
+      }
+    });
+  }
+
   return {
     duration,
     segmentCount: segments.length,
@@ -116,6 +146,7 @@ export const parseFeatures = (text, durationLimit = 0) => {
     })),
     rhythmScore: Number((payload.rhythmScore ?? rhythmScore).toFixed(2)),
     events,
-    edits: Array.isArray(payload.edits) ? payload.edits : [],
+    edits,
+    summary: payload.summary || "",
   };
 };

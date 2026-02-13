@@ -6,16 +6,18 @@ import os from "os";
 import { buildMockFeatures } from "../utils/mockFeatures.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
 
+import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
+
 export async function analyzeVideoWithGemini({ video, duration, request, intent, prompt, pe }) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const modelName = "gemini-2.5-flash"; // 使用最新 Flash 模型
+  const modelName = "gemini-2.5-flash"; // 尝试使用最新的 2.5 Flash 模型
 
   const debugTimeline = [
     {
       time: new Date().toISOString(),
       role: "system",
       level: "info",
-      message: "准备调用 Gemini (File API 模式)",
+      message: "准备调用 Gemini (Agent 模式)",
       data: { model: modelName, hasRequest: Boolean(request), size: video.buffer.length, pe },
     },
   ];
@@ -82,44 +84,25 @@ export async function analyzeVideoWithGemini({ video, duration, request, intent,
       time: new Date().toISOString(),
       role: "system",
       level: "info",
-      message: "处理完成，开始分析",
+      message: "处理完成，开始 Re-Act 推理",
     });
 
-    // 4. 分析
-    // 系统指令：定义 AI 的角色和输出标准
-    const systemInstruction = `你是一位专业的视频剪辑专家和 AI 视觉分析师${pe ? `，当前身份是：${pe}` : ""}。
-你的任务是根据用户的需求，从视频中精准提取高质量的素材片段。
-
-输出规范：
-1. 必须只输出 JSON 格式，禁止任何解释性文字。
-2. 时间格式：使用 "HH:MM:SS" 或秒数（数字）。
-3. JSON 结构参考：
-{
-  "segments": [{"start": string, "end": string, "energy": float, "label": string}],
-  "events": [{"label": string, "start": string, "end": string, "confidence": float}]
-}`;
-
+    // 4. 分析与推理
+    // 使用 gemini-2.0-flash 获得更强的 Agent 推理能力
     const model = genAI.getGenerativeModel({ 
-      model: modelName,
-      systemInstruction,
+      model: modelName, 
+      systemInstruction: AGENT_SYSTEM_PROMPT,
       generationConfig: {
         responseMimeType: "application/json",
       }
     });
     
-    // 构造最终的 Prompt
-    let finalPrompt = "";
-    if (prompt) {
-      finalPrompt = prompt;
-    } else {
-      finalPrompt = `请分析该视频。
-识别需求：${request || "分析视频内容并提取精彩片段"}
+    // 构造最终的 Prompt，包含当前视频的信息
+    const finalPrompt = `用户指令: "${request || "分析并剪辑视频"}"
+视频时长: ${duration}s
+文件名: ${video.name}
 
-提取准则：
-- 动作精准：片段应包含完整的动作过程。
-- 上下文：建议在动作开始前保留少量预备画面。
-- 格式：请严格按照 JSON 规范输出结果。`;
-    }
+请基于视频内容和用户指令，执行 Re-Act 推理并给出剪辑方案。`;
 
     const result = await model.generateContent([
       {
@@ -136,14 +119,29 @@ export async function analyzeVideoWithGemini({ video, duration, request, intent,
       time: new Date().toISOString(),
       role: "model",
       level: "info",
-      message: "收到模型响应",
+      message: "收到 Agent 响应",
       data: { text: responseText.slice(0, 100) },
     });
 
+    // 解析结果
+    let agentPayload;
+    try {
+      agentPayload = JSON.parse(responseText);
+    } catch (e) {
+      console.error("JSON parse failed", responseText);
+      agentPayload = { steps: [], final_answer: "解析失败", edits: [] };
+    }
+
+    // 将 Agent 的 edits 转换为 features 格式
     const features = parseFeatures(responseText, duration);
+    
     return {
-      source: "gemini",
-      features: features || buildMockFeatures(video, duration, responseText, intent, request),
+      source: "gemini-agent",
+      features: {
+        ...features,
+        summary: agentPayload.final_answer,
+        agentSteps: agentPayload.steps,
+      },
       rawResponse: responseText,
       debugTimeline,
     };
@@ -153,7 +151,7 @@ export async function analyzeVideoWithGemini({ video, duration, request, intent,
       time: new Date().toISOString(),
       role: "system",
       level: "error",
-      message: "识别失败",
+      message: "Agent 推理失败",
       data: { error: String(error) },
     });
     return {

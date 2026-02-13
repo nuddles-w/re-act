@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import multer from "multer";
 import { analyzeVideoWithGemini } from "./providers/geminiProvider.js";
+import { analyzeWithMockAgent } from "./providers/mockAgentProvider.js";
 import { analyzeWithMock } from "./providers/mockProvider.js";
 
 const app = express();
@@ -43,7 +44,13 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     }
 
     const duration = Number(req.body.duration || 0);
-    const provider = resolveProvider();
+    const isMock = req.body.isMock === 'true';
+    
+    let provider = resolveProvider();
+    if (isMock) {
+      provider = analyzeWithMockAgent;
+    }
+
     let intent = null;
     if (req.body.intent) {
       try {
