@@ -133,6 +133,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       source: result.source,
       features: result.features,
       summary: result.summary,
+      rawResponse: result.rawResponse,
       debug: {
         requestId,
         pe,

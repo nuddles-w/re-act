@@ -271,6 +271,14 @@ export default function App() {
         time: new Date().toLocaleTimeString(),
         message: `识别完成！找到 ${data.features?.events?.length || 0} 个事件和 ${data.features?.segments?.length || 0} 个片段。`,
       });
+
+      if (data.rawResponse) {
+        appendChatMessage({
+          role: "assistant",
+          time: new Date().toLocaleTimeString(),
+          message: `模型原始返回：\n${data.rawResponse}`,
+        });
+      }
     } catch (error) {
       const fallback = extractFeaturesFromVideo(file, duration);
       setFeatures(fallback);

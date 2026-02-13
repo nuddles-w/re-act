@@ -6,9 +6,9 @@ import os from "os";
 import { buildMockFeatures } from "../utils/mockFeatures.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
 
-export async function analyzeVideoWithGemini({ video, duration, request, intent, prompt }) {
+export async function analyzeVideoWithGemini({ video, duration, request, intent, prompt, pe }) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const modelName = "gemini-1.5-flash"; // Flash is stable for video
+  const modelName = "gemini-2.5-flash"; // 使用最新 Flash 模型
 
   const debugTimeline = [
     {
@@ -16,7 +16,7 @@ export async function analyzeVideoWithGemini({ video, duration, request, intent,
       role: "system",
       level: "info",
       message: "准备调用 Gemini (File API 模式)",
-      data: { model: modelName, hasRequest: Boolean(request), size: video.buffer.length },
+      data: { model: modelName, hasRequest: Boolean(request), size: video.buffer.length, pe },
     },
   ];
 
@@ -86,13 +86,40 @@ export async function analyzeVideoWithGemini({ video, duration, request, intent,
     });
 
     // 4. 分析
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const analysisPrompt = prompt || `请分析该视频并输出 JSON。识别：${request || "视频内容"}。
-JSON 格式：
+    // 系统指令：定义 AI 的角色和输出标准
+    const systemInstruction = `你是一位专业的视频剪辑专家和 AI 视觉分析师${pe ? `，当前身份是：${pe}` : ""}。
+你的任务是根据用户的需求，从视频中精准提取高质量的素材片段。
+
+输出规范：
+1. 必须只输出 JSON 格式，禁止任何解释性文字。
+2. 时间格式：使用 "HH:MM:SS" 或秒数（数字）。
+3. JSON 结构参考：
 {
-  "segments": [{"start": 0, "end": 5, "energy": 0.5}],
-  "events": [{"label": "描述", "start": 0, "end": 5, "confidence": 0.9}]
+  "segments": [{"start": string, "end": string, "energy": float, "label": string}],
+  "events": [{"label": string, "start": string, "end": string, "confidence": float}]
 }`;
+
+    const model = genAI.getGenerativeModel({ 
+      model: modelName,
+      systemInstruction,
+      generationConfig: {
+        responseMimeType: "application/json",
+      }
+    });
+    
+    // 构造最终的 Prompt
+    let finalPrompt = "";
+    if (prompt) {
+      finalPrompt = prompt;
+    } else {
+      finalPrompt = `请分析该视频。
+识别需求：${request || "分析视频内容并提取精彩片段"}
+
+提取准则：
+- 动作精准：片段应包含完整的动作过程。
+- 上下文：建议在动作开始前保留少量预备画面。
+- 格式：请严格按照 JSON 规范输出结果。`;
+    }
 
     const result = await model.generateContent([
       {
@@ -101,7 +128,7 @@ JSON 格式：
           fileUri: file.uri,
         },
       },
-      { text: analysisPrompt },
+      { text: finalPrompt },
     ]);
 
     const responseText = result.response.text();
@@ -117,6 +144,7 @@ JSON 格式：
     return {
       source: "gemini",
       features: features || buildMockFeatures(video, duration, responseText, intent, request),
+      rawResponse: responseText,
       debugTimeline,
     };
 
