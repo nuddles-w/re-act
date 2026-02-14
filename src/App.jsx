@@ -129,6 +129,7 @@ export default function App() {
   const [playheadTime, setPlayheadTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMock, setIsMock] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const isDraggingRef = useRef(false);
   const timelineRef = useRef(null);
   const [thumbnails, setThumbnails] = useState([]);
@@ -456,13 +457,47 @@ export default function App() {
     }
   };
 
-  const handleExport = () => {
-    if (!timeline) return;
-    const blob = new Blob([JSON.stringify({ timeline, features }, null, 2)], { type: "application/json" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "timeline-export.json";
-    link.click();
+  const handleExport = async () => {
+    if (!timeline || !file) return;
+    setIsExporting(true);
+    
+    try {
+      const formData = new FormData();
+      formData.append("video", file);
+      formData.append("timeline", JSON.stringify(timeline));
+
+      const response = await fetch(`${apiBase}/api/export`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Export failed");
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${file.name.split('.')[0]}_edited.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      appendChatMessage({
+        role: "assistant",
+        time: new Date().toLocaleTimeString(),
+        message: "✅ 视频导出成功！已利用 Mac 硬件加速完成渲染。",
+      });
+    } catch (error) {
+      console.error("Export error:", error);
+      appendChatMessage({
+        role: "system",
+        time: new Date().toLocaleTimeString(),
+        message: "❌ 导出失败，请检查后端 FFmpeg 配置。",
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -479,7 +514,13 @@ export default function App() {
           项目识别 - {file?.name || "未命名"}
         </div>
         <div className="header-right">
-          <button className="btn-export" onClick={handleExport} disabled={!timeline}>Export</button>
+          <button 
+            className={`btn-export ${isExporting ? 'exporting' : ''}`} 
+            onClick={handleExport} 
+            disabled={!timeline || isExporting}
+          >
+            {isExporting ? "Exporting..." : "Export"}
+          </button>
           <div className="user-avatar">👤</div>
         </div>
       </header>
