@@ -11,6 +11,8 @@
   --track-v1: #344465;
   --track-a1: #2d4c3b;
   --track-event: #4d3d2a;
+  --track-text: #4a2d5c;
+  --track-fade: #3a3a1a;
 }
 
 * {
@@ -282,6 +284,30 @@ body {
   cursor: pointer;
 }
 
+.engine-select {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 132, 255, 0.08);
+}
+
+.engine-select label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.engine-select select {
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
 .prompt-input-area {
   position: relative;
   background: var(--bg-panel);
@@ -344,6 +370,7 @@ body {
 }
 
 .preview-container {
+  position: relative;
   flex: 1;
   display: flex;
   align-items: center;
@@ -679,3 +706,52 @@ body {
   background-size: 100px 100%;
   opacity: 0.3;
 }
+
+/* Text track (T1) */
+.text-edit-node {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  background: var(--track-text);
+  border: 1px solid rgba(180, 120, 255, 0.5);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #d4a0ff;
+  cursor: default;
+  z-index: 5;
+}
+
+/* Fade track (FX) */
+.fade-edit-node {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  background: var(--track-fade);
+  border: 1px solid rgba(255, 220, 60, 0.5);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  color: #ffe066;
+  cursor: default;
+  z-index: 5;
+}
+
+.fade-edit-node.fade-in {
+  background: linear-gradient(to right, #1a1a0a, var(--track-fade));
+}
+
+.fade-edit-node.fade-out {
+  background: linear-gradient(to left, #1a1a0a, var(--track-fade));
+}
+
+/* 文字叠加使用 inline style，CSS 中不再控制尺寸和位置（由 videoArea 计算保证与导出一致） */

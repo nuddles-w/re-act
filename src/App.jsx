@@ -1,113 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultIntent } from "./domain/models.js";
 import { extractFeaturesFromVideo } from "./domain/featureExtractor.js";
 import { buildTimeline } from "./domain/strategyEngine.js";
+import { applyEditsToTimeline } from "./domain/applyEditsToTimeline.js";
 
 const formatTime = (value) => {
   const minutes = Math.floor(value / 60);
   const seconds = Math.floor(value % 60);
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-};
-
-const applyEditsToTimeline = (timeline, edits, totalDuration = 0) => {
-  if (!timeline) return timeline;
-  if (!edits || edits.length === 0) return timeline;
-
-  // 如果当前没有片段（比如分析前或 Agent 未返回片段），则创建一个覆盖全时长的基础片段
-  let currentClips = timeline.clips && timeline.clips.length > 0 
-    ? [...timeline.clips] 
-    : [{ 
-        start: 0, 
-        end: totalDuration, 
-        duration: totalDuration, 
-        id: 'base-clip', 
-        energy: 0.5, 
-        label: 'Original Video' 
-      }];
-
-  // 1. 物理分割阶段：根据 edits 中的时间点，将现有片段切碎
-  const splitPoints = new Set();
-  edits.forEach(edit => {
-    if (edit.start != null && edit.start > 0) splitPoints.add(Number(edit.start.toFixed(2)));
-    if (edit.end != null && edit.end > 0) splitPoints.add(Number(edit.end.toFixed(2)));
-  });
-
-  // 按照时间排序分割点
-  const sortedPoints = Array.from(splitPoints).sort((a, b) => a - b);
-
-  sortedPoints.forEach(point => {
-    const newClips = [];
-    currentClips.forEach(clip => {
-      // 使用更宽松的阈值 (0.1s) 来避免过碎的片段，同时处理浮点数精度
-      if (point > clip.start + 0.1 && point < clip.end - 0.1) {
-        // 分裂成两个片段
-        newClips.push(
-          { 
-            ...clip, 
-            end: point, 
-            duration: point - clip.start, 
-            id: `split-${clip.start.toFixed(2)}-${point.toFixed(2)}` 
-          },
-          { 
-            ...clip, 
-            start: point, 
-            duration: clip.end - point, 
-            id: `split-${point.toFixed(2)}-${clip.end.toFixed(2)}` 
-          }
-        );
-      } else {
-        newClips.push(clip);
-      }
-    });
-    currentClips = newClips;
-  });
-
-  // 2. 属性应用阶段：为落在 edit 范围内的片段应用倍速等属性
-  const finalClips = currentClips.map(clip => {
-    // 寻找覆盖该片段的 edit（优先找变速 edit）
-    // 使用 0.2s 的容错区间，确保即使分割点略有偏差也能匹配上
-    const speedEdit = edits.find(e => 
-      e.type === 'speed' && 
-      e.start <= clip.start + 0.2 && 
-      e.end >= clip.end - 0.2
-    );
-
-    const splitEdit = edits.find(e => 
-      e.type === 'split' && 
-      e.start <= clip.start + 0.2 && 
-      e.end >= clip.end - 0.2
-    );
-
-    const edit = speedEdit || splitEdit;
-
-    if (!edit) return { ...clip, playbackRate: 1 };
-
-    return {
-      ...clip,
-      playbackRate: edit.rate || 1,
-      edit,
-    };
-  });
-
-  // 3. 计算轨道显示时间阶段：根据倍率缩放片段长度
-  let currentTimelineTime = 0;
-  const clipsWithTimelinePositions = finalClips.map(clip => {
-    const playbackRate = clip.playbackRate || 1;
-    const displayDuration = clip.duration / playbackRate;
-    const timelineClip = {
-      ...clip,
-      timelineStart: currentTimelineTime,
-      displayDuration: displayDuration,
-    };
-    currentTimelineTime += displayDuration;
-    return timelineClip;
-  });
-
-  return {
-    ...timeline,
-    clips: clipsWithTimelinePositions,
-    totalTimelineDuration: currentTimelineTime
-  };
 };
 
 export default function App() {
@@ -129,9 +29,47 @@ export default function App() {
   const [playheadTime, setPlayheadTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMock, setIsMock] = useState(false);
+  const [engine, setEngine] = useState(import.meta.env.VITE_AI_ENGINE || "auto");
   const [isExporting, setIsExporting] = useState(false);
   const isDraggingRef = useRef(false);
   const timelineRef = useRef(null);
+  const previewContainerRef = useRef(null);
+  const [videoArea, setVideoArea] = useState(null); // 视频在预览区的实际渲染位置和尺寸
+
+  // 计算视频在 preview-container 内的实际渲染区域（考虑 object-fit: contain 的留白）
+  const updateVideoArea = useCallback(() => {
+    const el = videoRef.current;
+    const container = previewContainerRef.current;
+    if (!el || !container || !el.videoWidth || !el.videoHeight) return;
+
+    const elW = el.clientWidth;
+    const elH = el.clientHeight;
+    const vidW = el.videoWidth;
+    const vidH = el.videoHeight;
+    if (!elW || !elH) return;
+
+    // 计算 object-fit: contain 后视频内容的实际尺寸
+    const videoAspect = vidW / vidH;
+    const elAspect = elW / elH;
+    let renderedW, renderedH;
+    if (videoAspect > elAspect) {
+      renderedW = elW;
+      renderedH = elW / videoAspect;
+    } else {
+      renderedH = elH;
+      renderedW = elH * videoAspect;
+    }
+
+    // 视频元素相对于 preview-container 的偏移 + contain 留白偏移
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    setVideoArea({
+      width: renderedW,
+      height: renderedH,
+      left: (elRect.left - containerRect.left) + (elW - renderedW) / 2,
+      top: (elRect.top - containerRect.top) + (elH - renderedH) / 2,
+    });
+  }, []);
   const [thumbnails, setThumbnails] = useState([]);
   const [thumbnailStatus, setThumbnailStatus] = useState("idle");
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
@@ -234,7 +172,14 @@ export default function App() {
     if (!videoRef.current || !file) return;
     const nextDuration = videoRef.current.duration || 0;
     setDuration(nextDuration);
+    requestAnimationFrame(updateVideoArea);
   };
+
+  // 窗口 resize 时重新计算视频渲染区域
+  useEffect(() => {
+    window.addEventListener("resize", updateVideoArea);
+    return () => window.removeEventListener("resize", updateVideoArea);
+  }, [updateVideoArea]);
 
   const handleClipPlay = (clip) => {
     if (!videoRef.current) return;
@@ -383,6 +328,7 @@ export default function App() {
       formData.append("request", userRequest);
       formData.append("pe", pe);
       formData.append("isMock", isMock.toString());
+      formData.append("engine", engine);
 
       const response = await fetch(`${apiBase}/api/analyze`, {
         method: "POST",
@@ -579,6 +525,16 @@ export default function App() {
                 Mock 调试模式 (跳过视频处理)
               </label>
             </div>
+            <div className="engine-select">
+              <label>
+                识别引擎
+                <select value={engine} onChange={(e) => setEngine(e.target.value)}>
+                  <option value="auto">Auto</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="doubao">Doubao Seed 2.0</option>
+                </select>
+              </label>
+            </div>
             <div className="prompt-input-area">
               <textarea 
                 value={userRequest}
@@ -605,12 +561,12 @@ export default function App() {
         </aside>
 
         <section className="editor-preview">
-          <div className="preview-container">
+          <div className="preview-container" ref={previewContainerRef}>
             {videoUrl ? (
               <>
-                <video 
-                  ref={videoRef} 
-                  src={videoUrl} 
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
                   onLoadedMetadata={handleMetadataLoaded}
                   onTimeUpdate={handleTimeUpdate}
                   onPlay={() => setIsPlaying(true)}
@@ -622,6 +578,57 @@ export default function App() {
                     {videoRef.current.playbackRate}x
                   </div>
                 )}
+                {videoArea && timeline?.textEdits?.map((edit, i) => {
+                  const isActive = playheadTime >= edit.timelineStart - 0.05 && playheadTime <= edit.timelineEnd + 0.05;
+                  if (!isActive) return null;
+
+                  // 与导出完全一致：字体 = 视频高度 * 4%，padding = 字体 * 25%
+                  const fontSize = Math.round(videoArea.height * 0.04);
+                  const padding = Math.round(fontSize * 0.25);
+                  const boxH = fontSize + padding * 2;
+                  const pos = edit.position || "bottom";
+
+                  let topPx;
+                  if (pos === "top") {
+                    topPx = videoArea.top + Math.round(videoArea.height * 0.08);
+                  } else if (pos === "center") {
+                    topPx = videoArea.top + (videoArea.height - boxH) / 2;
+                  } else {
+                    topPx = videoArea.top + videoArea.height - boxH - Math.round(videoArea.height * 0.08);
+                  }
+
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        position: "absolute",
+                        left: `${Math.round(videoArea.left)}px`,
+                        top: `${Math.round(topPx)}px`,
+                        width: `${Math.round(videoArea.width)}px`,
+                        height: `${boxH}px`,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: `${fontSize}px`,
+                        fontWeight: "bold",
+                        color: "white",
+                        textShadow: [
+                          "1px 1px 0 rgba(0,0,0,0.9)",
+                          "-1px -1px 0 rgba(0,0,0,0.9)",
+                          "1px -1px 0 rgba(0,0,0,0.9)",
+                          "-1px 1px 0 rgba(0,0,0,0.9)",
+                          "0 0 8px rgba(0,0,0,0.8)",
+                        ].join(", "),
+                        pointerEvents: "none",
+                        zIndex: 50,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {edit.text}
+                    </div>
+                  );
+                })}
               </>
             ) : (
               <div className="preview-placeholder">上传视频以开始</div>
@@ -730,6 +737,50 @@ export default function App() {
                       title={ev.label}
                     >
                       {ev.label}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="track track-t1">
+              <div className="track-id">T1</div>
+              <div className="track-content">
+                {timeline?.textEdits?.map((edit, i) => {
+                  const tDuration = timeline.totalTimelineDuration || duration;
+                  return (
+                    <div
+                      key={i}
+                      className="text-edit-node"
+                      style={{
+                        left: `${(edit.timelineStart / tDuration) * 100}%`,
+                        width: `${((edit.timelineEnd - edit.timelineStart) / tDuration) * 100}%`,
+                      }}
+                      title={edit.text}
+                    >
+                      T: {edit.text}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="track track-fade">
+              <div className="track-id">FX</div>
+              <div className="track-content">
+                {timeline?.fadeEdits?.map((edit, i) => {
+                  const tDuration = timeline.totalTimelineDuration || duration;
+                  return (
+                    <div
+                      key={i}
+                      className={`fade-edit-node fade-${edit.direction}`}
+                      style={{
+                        left: `${(edit.timelineStart / tDuration) * 100}%`,
+                        width: `${((edit.timelineEnd - edit.timelineStart) / tDuration) * 100}%`,
+                      }}
+                      title={`淡${edit.direction === "in" ? "入" : "出"}`}
+                    >
+                      {edit.direction === "in" ? "▶ 淡入" : "淡出 ◀"}
                     </div>
                   );
                 })}

@@ -67,11 +67,26 @@ const buildEditsFromRequest = (segments, requestText) => {
   const edits = [];
   if (text.includes("变慢") || text.includes("0.5")) {
     edits.push({
-      type: "slow",
+      type: "speed",
       start: targetSegment.start,
       end: targetSegment.end,
       rate: 0.5,
       reason: "根据用户诉求降速",
+      split: true,
+    });
+  }
+
+  if (
+    text.includes("删除") ||
+    text.includes("去掉") ||
+    text.includes("去除") ||
+    text.includes("移除")
+  ) {
+    edits.push({
+      type: "delete",
+      start: targetSegment.start,
+      end: targetSegment.end,
+      reason: "根据用户诉求删除",
       split: true,
     });
   }

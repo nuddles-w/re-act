@@ -133,8 +133,129 @@ export const parseFeatures = (text, durationLimit = 0) => {
           rate: parseFloat(speedMatch[3])
         });
       }
+
+      // 提取 delete_segment(start, end)
+      const deleteMatch = step.action.match(/delete_segment\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/i);
+      if (deleteMatch) {
+        edits.push({
+          type: "delete",
+          start: parseFloat(deleteMatch[1]),
+          end: parseFloat(deleteMatch[2]),
+        });
+      }
+
+      // 提取 add_text(start, end, "text", "position")
+      const textMatch = step.action.match(/add_text\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*["']([^"']+)["']\s*(?:,\s*["'](\w+)["'])?\s*\)/i);
+      if (textMatch) {
+        edits.push({
+          type: "text",
+          start: parseFloat(textMatch[1]),
+          end: parseFloat(textMatch[2]),
+          text: textMatch[3],
+          position: textMatch[4] || "bottom",
+        });
+      }
+
+      // 提取 fade_in(startTime, duration)
+      const fadeInMatch = step.action.match(/fade_in\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/i);
+      if (fadeInMatch) {
+        const st = parseFloat(fadeInMatch[1]);
+        const dur = parseFloat(fadeInMatch[2]);
+        edits.push({ type: "fade", start: st, end: st + dur, direction: "in" });
+      }
+
+      // 提取 fade_out(startTime, duration)
+      const fadeOutMatch = step.action.match(/fade_out\s*\(\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/i);
+      if (fadeOutMatch) {
+        const st = parseFloat(fadeOutMatch[1]);
+        const dur = parseFloat(fadeOutMatch[2]);
+        edits.push({ type: "fade", start: st, end: st + dur, direction: "out" });
+      }
     });
   }
+
+  const normalizedEdits = edits
+    .map((edit) => {
+      if (!edit || typeof edit !== "object") return null;
+      const rawType = String(edit.type || "").toLowerCase();
+      const start = timeToSeconds(edit.start);
+      const end = timeToSeconds(edit.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+
+      const durationClamp = duration > 0 ? duration : 0;
+      const clampedStart = durationClamp > 0 ? Math.max(0, Math.min(start, durationClamp)) : start;
+      const clampedEnd = durationClamp > 0 ? Math.max(0, Math.min(end, durationClamp)) : end;
+      if (!(clampedStart < clampedEnd)) return null;
+
+      if (rawType === "slow") {
+        const rate = Number(edit.rate ?? 0.5);
+        return {
+          ...edit,
+          type: "speed",
+          start: clampedStart,
+          end: clampedEnd,
+          rate: Number.isFinite(rate) && rate > 0 ? rate : 0.5,
+        };
+      }
+
+      if (rawType === "speed") {
+        const rate = Number(edit.rate ?? edit.speed ?? 1);
+        return {
+          ...edit,
+          type: "speed",
+          start: clampedStart,
+          end: clampedEnd,
+          rate: Number.isFinite(rate) && rate > 0 ? rate : 1,
+        };
+      }
+
+      if (rawType === "delete" || rawType === "remove" || rawType === "cut" || rawType === "drop") {
+        return {
+          ...edit,
+          type: "delete",
+          start: clampedStart,
+          end: clampedEnd,
+        };
+      }
+
+      if (rawType === "split") {
+        return {
+          ...edit,
+          type: "split",
+          start: clampedStart,
+          end: clampedEnd,
+        };
+      }
+
+      if (rawType === "text") {
+        return {
+          ...edit,
+          type: "text",
+          start: clampedStart,
+          end: clampedEnd,
+          text: String(edit.text || ""),
+          position: edit.position || "bottom",
+        };
+      }
+
+      if (rawType === "fade") {
+        return {
+          ...edit,
+          type: "fade",
+          start: clampedStart,
+          end: clampedEnd,
+          direction: edit.direction === "out" ? "out" : "in",
+        };
+      }
+
+      return {
+        ...edit,
+        type: rawType || edit.type,
+        start: clampedStart,
+        end: clampedEnd,
+      };
+    })
+    .filter(Boolean);
 
   return {
     duration,
@@ -146,7 +267,7 @@ export const parseFeatures = (text, durationLimit = 0) => {
     })),
     rhythmScore: Number((payload.rhythmScore ?? rhythmScore).toFixed(2)),
     events,
-    edits,
+    edits: normalizedEdits,
     summary: payload.summary || "",
   };
 };
