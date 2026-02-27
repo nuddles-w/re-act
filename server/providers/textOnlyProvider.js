@@ -113,7 +113,7 @@ async function textOnlyWithDoubao({ duration, request, intent, prompt, pe }) {
 /**
  * 根据当前配置的引擎（gemini / doubao / auto）调用对应的文本模式 provider。
  */
-export async function analyzeTextOnly({ engine, duration, request, intent, prompt, pe }) {
+export async function analyzeTextOnly({ engine, duration, request, intent, prompt, pe, onProgress = null }) {
   const debugTimeline = [
     {
       time: new Date().toISOString(),
@@ -126,6 +126,7 @@ export async function analyzeTextOnly({ engine, duration, request, intent, promp
 
   try {
     // 选择合适的 API
+    onProgress?.("💬 本次操作无需视频理解，直接文本推理...");
     let result;
     if (
       engine === "doubao" ||
@@ -133,8 +134,10 @@ export async function analyzeTextOnly({ engine, duration, request, intent, promp
         !process.env.GEMINI_API_KEY &&
         (process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || process.env.VOLC_ARK_API_KEY))
     ) {
+      onProgress?.("🧠 Doubao 文本推理中...");
       result = await textOnlyWithDoubao({ duration, request, intent, prompt, pe });
     } else if (engine === "gemini" || (engine === "auto" && process.env.GEMINI_API_KEY)) {
+      onProgress?.("🧠 Gemini 文本推理中...");
       result = await textOnlyWithGemini({ duration, request, intent, prompt, pe });
     } else {
       // 无可用 API key，返回空结果

@@ -39,6 +39,7 @@ export async function analyzeVideoWithDoubaoSeed({
   intent,
   prompt,
   pe,
+  onProgress = null,
 }) {
   const apiKey =
     process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || process.env.VOLC_ARK_API_KEY;
@@ -78,6 +79,7 @@ export async function analyzeVideoWithDoubaoSeed({
   }
 
   try {
+    onProgress?.("⬆️ 正在上传视频到 Doubao...");
     const videoUrl = normalizeVideoDataUrl(video.buffer, video.mimeType);
     const userText = [
       pe ? `PE: ${pe}` : null,
@@ -107,6 +109,7 @@ export async function analyzeVideoWithDoubaoSeed({
       stream: false,
     };
 
+    onProgress?.("🧠 Doubao Seed 正在进行视频理解与推理...");
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {

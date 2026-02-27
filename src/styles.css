@@ -308,6 +308,15 @@ body {
   font-size: 12px;
 }
 
+.prepare-status {
+  font-size: 11px;
+  padding: 2px 0;
+  display: block;
+}
+.prepare-status.preparing { color: var(--text-muted); }
+.prepare-status.ready     { color: #4caf50; }
+.prepare-status.error     { color: #f44336; }
+
 .prompt-input-area {
   position: relative;
   background: var(--bg-panel);

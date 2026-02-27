@@ -31,6 +31,8 @@ export default function App() {
   const [isMock, setIsMock] = useState(false);
   const [engine, setEngine] = useState(import.meta.env.VITE_AI_ENGINE || "auto");
   const [isExporting, setIsExporting] = useState(false);
+  const [prepareId, setPrepareId] = useState(null);
+  const [prepareStatus, setPrepareStatus] = useState("idle"); // idle | preparing | ready | error
   const isDraggingRef = useRef(false);
   const timelineRef = useRef(null);
   const previewContainerRef = useRef(null);
@@ -166,6 +168,24 @@ export default function App() {
     setFeatures(null);
     setTimeline(null);
     setActiveClipId(null);
+    setPrepareId(null);
+    setPrepareStatus("idle");
+
+    // Gemini 预上传：用户选完文件立刻在后台开始压缩+上传
+    const eagerEnabled = import.meta.env.VITE_GEMINI_EAGER_UPLOAD === "true";
+    const isGeminiEngine = engine === "gemini" || engine === "auto";
+    if (eagerEnabled && isGeminiEngine) {
+      setPrepareStatus("preparing");
+      const formData = new FormData();
+      formData.append("video", nextFile);
+      fetch(`${apiBase}/api/prepare`, { method: "POST", body: formData })
+        .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+        .then(({ prepareId: id }) => {
+          setPrepareId(id);
+          setPrepareStatus("ready");
+        })
+        .catch(() => setPrepareStatus("error"));
+    }
   };
 
   const handleMetadataLoaded = () => {
@@ -329,6 +349,7 @@ export default function App() {
       formData.append("pe", pe);
       formData.append("isMock", isMock.toString());
       formData.append("engine", engine);
+      if (prepareId) formData.append("prepareId", prepareId);
 
       const response = await fetch(`${apiBase}/api/analyze`, {
         method: "POST",
@@ -337,54 +358,71 @@ export default function App() {
 
       if (!response.ok) throw new Error("Backend error");
 
-      const data = await response.json();
-      if (Array.isArray(data.debugTimeline)) {
-        data.debugTimeline.forEach((entry) => {
-          appendChatMessage({
-            role: "system",
-            time: new Date().toLocaleTimeString(),
-            message: entry.message,
-          });
-        });
-      }
-      
-      setFeatures(prev => ({
-        ...data.features,
-        // 如果新结果里没有片段，保留之前的片段特征
-        segments: (data.features.segments && data.features.segments.length > 0) 
-          ? data.features.segments 
-          : (prev?.segments || [])
-      }));
-      setAnalysisSource(data.source || "server");
-      setAnalysisStatus("done");
-      
-      // 展示 Agent 的推理过程
-      if (data.features?.agentSteps) {
-        data.features.agentSteps.forEach((step, index) => {
-          appendChatMessage({
-            role: "system",
-            time: new Date().toLocaleTimeString(),
-            message: `[Step ${index + 1}] 思考: ${step.thought}\n执行动作: ${step.action}`,
-          });
-        });
-      }
+      // ── 流式读取 SSE 进度事件 ───────────────────────────────────
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      const summaryMessage = data.features?.summary 
-        ? data.features.summary 
-        : `识别完成！找到 ${data.features?.events?.length || 0} 个事件和 ${data.features?.segments?.length || 0} 个片段。`;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      appendChatMessage({
-        role: "assistant",
-        time: new Date().toLocaleTimeString(),
-        message: summaryMessage,
-      });
+        buffer += decoder.decode(value, { stream: true });
+        // SSE 事件以 \n\n 分隔
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
 
-      if (data.rawResponse) {
-        appendChatMessage({
-          role: "assistant",
-          time: new Date().toLocaleTimeString(),
-          message: `模型原始返回：\n${data.rawResponse}`,
-        });
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+
+          let payload;
+          try { payload = JSON.parse(line.slice(6)); } catch (_) { continue; }
+
+          if (payload.type === "progress") {
+            // 实时追加进度消息到聊天框
+            appendChatMessage({
+              role: "system",
+              time: new Date().toLocaleTimeString(),
+              message: payload.message,
+            });
+
+          } else if (payload.type === "result") {
+            const data = payload;
+
+            setFeatures(prev => ({
+              ...data.features,
+              segments: (data.features.segments && data.features.segments.length > 0)
+                ? data.features.segments
+                : (prev?.segments || [])
+            }));
+            setAnalysisSource(data.source || "server");
+            setAnalysisStatus("done");
+
+            if (data.features?.agentSteps) {
+              data.features.agentSteps.forEach((step, index) => {
+                appendChatMessage({
+                  role: "system",
+                  time: new Date().toLocaleTimeString(),
+                  message: `[Step ${index + 1}] 思考: ${step.thought}\n执行动作: ${step.action}`,
+                });
+              });
+            }
+
+            const summaryMessage = data.features?.summary
+              ? data.features.summary
+              : `识别完成！找到 ${data.features?.events?.length || 0} 个事件和 ${data.features?.segments?.length || 0} 个片段。`;
+
+            appendChatMessage({
+              role: "assistant",
+              time: new Date().toLocaleTimeString(),
+              message: summaryMessage,
+            });
+
+          } else if (payload.type === "error") {
+            throw new Error(payload.message || "分析失败");
+          }
+        }
       }
     } catch (error) {
       const isQuotaError = error.message?.includes("429") || error.message?.includes("quota");
@@ -392,12 +430,12 @@ export default function App() {
       setFeatures(fallback);
       setAnalysisSource("local");
       setAnalysisStatus("error");
-      
+
       appendChatMessage({
         role: "system",
         time: new Date().toLocaleTimeString(),
-        message: isQuotaError 
-          ? "⚠️ Gemini API 配额已耗尽（429）。建议勾选下方“Mock 调试模式”继续验证 UI 逻辑。"
+        message: isQuotaError
+          ? '⚠️ Gemini API 配额已耗尽（429）。建议勾选下方「Mock 调试模式」继续验证 UI 逻辑。'
           : "识别异常，已切换为本地基础解析。",
       });
     }
@@ -534,6 +572,9 @@ export default function App() {
                   <option value="doubao">Doubao Seed 2.0</option>
                 </select>
               </label>
+              {prepareStatus === "preparing" && <span className="prepare-status preparing">⏳ 预上传中…</span>}
+              {prepareStatus === "ready"     && <span className="prepare-status ready">✅ 已就绪</span>}
+              {prepareStatus === "error"     && <span className="prepare-status error">⚠️ 预上传失败</span>}
             </div>
             <div className="prompt-input-area">
               <textarea 

@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import multer from "multer";
-import { analyzeVideoWithGemini } from "./providers/geminiProvider.js";
+import { analyzeVideoWithGemini, prepareGeminiUpload } from "./providers/geminiProvider.js";
 import { analyzeVideoWithDoubaoSeed } from "./providers/doubaoSeedProvider.js";
 import { analyzeWithMockAgent } from "./providers/mockAgentProvider.js";
 import { analyzeWithMock } from "./providers/mockProvider.js";
@@ -108,6 +108,26 @@ app.use((req, res, next) => {
   next();
 });
 
+// ── Gemini 预上传缓存 ──────────────────────────────────────────────
+// prepareId → { promise: Promise<{fileUri,mimeType,fileMetadata,fileManager}>, createdAt }
+const prepareMap = new Map();
+
+// 每 5 分钟清理超过 15 分钟的过期条目
+setInterval(() => {
+  const expiry = Date.now() - 15 * 60 * 1000;
+  for (const [id, entry] of prepareMap) {
+    if (entry.createdAt < expiry) {
+      // 尝试删除 Gemini 远端文件（已经过时了，不影响主流程）
+      entry.promise.then((data) => {
+        if (data?.fileMetadata && data?.fileManager) {
+          data.fileManager.deleteFile(data.fileMetadata.name).catch(() => {});
+        }
+      }).catch(() => {});
+      prepareMap.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
+
 const PROVIDERS = {
   gemini: analyzeVideoWithGemini,
   doubao: analyzeVideoWithDoubaoSeed,
@@ -140,162 +160,140 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Gemini 预上传端点（GEMINI_EAGER_UPLOAD=true 时启用）──────────────
+app.post("/api/prepare", upload.single("video"), (req, res) => {
+  if (process.env.GEMINI_EAGER_UPLOAD !== "true") {
+    return res.status(404).json({ error: "eager_upload_disabled" });
+  }
+
+  const videoFile = req.file;
+  if (!videoFile) return res.status(400).json({ error: "missing_video" });
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(400).json({ error: "no_gemini_key" });
+
+  const prepareId = `prep-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+
+  // 立刻返回 prepareId，后台异步跑压缩 + 上传 + 轮询
+  const preparePromise = prepareGeminiUpload(
+    {
+      name: videoFile.originalname,
+      size: videoFile.size,
+      mimeType: videoFile.mimetype,
+      buffer: videoFile.buffer,
+    },
+    apiKey
+  ).catch((err) => {
+    console.error(`[prepare:${prepareId}] failed:`, err.message);
+    return null; // 失败时返回 null，analyze 会走兜底流程
+  });
+
+  prepareMap.set(prepareId, { promise: preparePromise, createdAt: Date.now() });
+  console.log(`[prepare:${prepareId}] started (${(videoFile.size / 1024 / 1024).toFixed(1)}MB)`);
+
+  res.json({ prepareId });
+});
+
 app.post("/api/analyze", upload.single("video"), async (req, res) => {
   const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+
+  const videoFile = req.file;
+  if (!videoFile) return res.status(400).json({ error: "missing_video" });
+
+  const engine = resolveEngine(req);
+  const provider = resolveProvider(engine);
+  if (!provider) return res.status(400).json({ error: "invalid_engine", engine });
+
+  // ── 切换为 SSE 流式响应 ──────────────────────────────────────────
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("X-Accel-Buffering", "no"); // 禁用 nginx 缓冲
+  res.flushHeaders();
+
+  const emitProgress = (message) =>
+    res.write(`data: ${JSON.stringify({ type: "progress", message })}\n\n`);
+
+  const emitResult = (payload) => {
+    res.write(`data: ${JSON.stringify({ type: "result", ...payload })}\n\n`);
+    res.end();
+  };
+
+  const emitError = (message, debug = {}) => {
+    res.write(`data: ${JSON.stringify({ type: "error", message, debug })}\n\n`);
+    res.end();
+  };
+
   try {
-    const videoFile = req.file;
-    if (!videoFile) {
-      res.status(400).json({ error: "missing_video" });
-      return;
-    }
-
     const duration = Number(req.body.duration || 0);
-    const engine = resolveEngine(req);
-    const provider = resolveProvider(engine);
-    if (!provider) {
-      res.status(400).json({ error: "invalid_engine", engine });
-      return;
-    }
-
     let intent = null;
-    if (req.body.intent) {
-      try {
-        intent = JSON.parse(req.body.intent);
-      } catch (error) {
-        intent = null;
-      }
-    }
-
+    try { intent = JSON.parse(req.body.intent || "null"); } catch (_) {}
     const pe = req.body.pe || "";
     const request = req.body.request || "";
     const prompt = req.body.prompt || "";
-    const debugTimeline = [
-      {
-        time: new Date().toISOString(),
-        role: "system",
-        level: "info",
-        message: "收到识别请求",
-        data: {
-          name: videoFile.originalname,
-          size: videoFile.size,
-          duration,
-          pe,
-          request,
-          engine,
-        },
-      },
-    ];
-    console.log(
-      `[analyze:${requestId}] start`,
-      JSON.stringify(
-        {
-          name: videoFile.originalname,
-          size: videoFile.size,
-          duration,
-          pe,
-          request,
-          engine,
-        },
-        null,
-        2
-      )
-    );
 
-    // Re-Act 智能路由：判断是否需要视频内容理解
-    // 如果操作是纯结构性的（加文字、淡入淡出等），跳过视频上传，直接用文本模式推理
-    // engine === "mock-agent" when isMock=true, so checking engine covers that case too
-    const skipVideoUpload =
-      engine !== "mock" &&
-      engine !== "mock-agent" &&
-      !needsVideoAnalysis(request);
+    const debugTimeline = [{
+      time: new Date().toISOString(), role: "system", level: "info",
+      message: "收到识别请求",
+      data: { name: videoFile.originalname, size: videoFile.size, duration, pe, request, engine },
+    }];
 
-    if (skipVideoUpload) {
-      debugTimeline.push({
-        time: new Date().toISOString(),
-        role: "system",
-        level: "info",
-        message: "Re-Act 路由：操作无需视频理解，跳过视频上传",
-        data: { request },
-      });
+    console.log(`[analyze:${requestId}] start`, JSON.stringify({ name: videoFile.originalname, size: videoFile.size, duration, pe, request, engine }, null, 2));
+    emitProgress("🎬 收到请求，正在分析意图...");
+
+    // Re-Act 智能路由
+    const skipVideoUpload = engine !== "mock" && engine !== "mock-agent" && !needsVideoAnalysis(request);
+
+    // 检查 Gemini 预上传
+    const prepareId = req.body.prepareId || null;
+    let preloadedFile = null;
+    if (prepareId && prepareMap.has(prepareId) && engine !== "mock" && engine !== "mock-agent") {
+      const entry = prepareMap.get(prepareId);
+      prepareMap.delete(prepareId);
+      const prepared = await entry.promise;
+      if (prepared?.fileUri) {
+        preloadedFile = prepared;
+        console.log(`[analyze:${requestId}] 命中预上传缓存`);
+      } else {
+        console.warn(`[analyze:${requestId}] 预上传失败，回退完整流程`);
+        emitProgress("⚠️ 预上传未就绪，重新上传视频...");
+      }
     }
+
+    const video = {
+      name: videoFile.originalname,
+      size: videoFile.size,
+      mimeType: videoFile.mimetype,
+      buffer: videoFile.buffer,
+    };
 
     const result = skipVideoUpload
-      ? await analyzeTextOnly({ engine, duration, request, intent, prompt, pe })
-      : await provider({
-          video: {
-            name: videoFile.originalname,
-            size: videoFile.size,
-            mimeType: videoFile.mimetype,
-            buffer: videoFile.buffer,
-          },
-          duration,
-          intent,
-          prompt,
-          request,
-          pe,
-        });
-    if (Array.isArray(result.debugTimeline)) {
-      debugTimeline.push(...result.debugTimeline);
-    }
+      ? await analyzeTextOnly({ engine, duration, request, intent, prompt, pe, onProgress: emitProgress })
+      : await provider({ video, duration, intent, prompt, request, pe, preloadedFile, onProgress: emitProgress });
+
+    if (Array.isArray(result.debugTimeline)) debugTimeline.push(...result.debugTimeline);
     debugTimeline.push({
-      time: new Date().toISOString(),
-      role: "system",
-      level: "info",
-      message: "识别完成",
-      data: {
-        source: result.source,
-        segmentCount: result.features?.segmentCount,
-        events: result.features?.events?.length || 0,
-        edits: result.features?.edits?.length || 0,
-      },
+      time: new Date().toISOString(), role: "system", level: "info", message: "识别完成",
+      data: { source: result.source, edits: result.features?.edits?.length || 0 },
     });
 
-    console.log(
-      `[analyze:${requestId}] done`,
-      JSON.stringify(
-        {
-          source: result.source,
-          segmentCount: result.features?.segmentCount,
-          events: result.features?.events?.length || 0,
-          edits: result.features?.edits?.length || 0,
-        },
-        null,
-        2
-      )
-    );
+    console.log(`[analyze:${requestId}] done`, JSON.stringify({
+      source: result.source,
+      segmentCount: result.features?.segmentCount,
+      events: result.features?.events?.length || 0,
+      edits: result.features?.edits?.length || 0,
+    }, null, 2));
 
-    res.json({
+    emitResult({
       source: result.source,
       features: result.features,
       summary: result.summary,
       rawResponse: result.rawResponse,
-      debug: {
-        requestId,
-        pe,
-        request,
-        prompt,
-        engine,
-      },
+      debug: { requestId, pe, request, prompt, engine },
       debugTimeline,
     });
   } catch (error) {
-    console.error(
-      `[analyze:${requestId}] error`,
-      JSON.stringify({ message: String(error) }, null, 2)
-    );
-    res.status(500).json({
-      error: "analysis_failed",
-      debug: { requestId, message: String(error) },
-      debugTimeline: [
-        {
-          time: new Date().toISOString(),
-          role: "system",
-          level: "error",
-          message: "识别异常",
-          data: { requestId, error: String(error) },
-        },
-      ],
-    });
+    console.error(`[analyze:${requestId}] error`, String(error));
+    emitError("识别异常：" + String(error), { requestId });
   }
 });
 
