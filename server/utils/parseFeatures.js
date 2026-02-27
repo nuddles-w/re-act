@@ -171,6 +171,16 @@ export const parseFeatures = (text, durationLimit = 0) => {
         const dur = parseFloat(fadeOutMatch[2]);
         edits.push({ type: "fade", start: st, end: st + dur, direction: "out" });
       }
+
+      // 提取 add_bgm("keywords", volume)
+      const bgmMatch = step.action.match(/add_bgm\s*\(\s*["']([^"']*)["']\s*(?:,\s*([\d.]+))?\s*\)/i);
+      if (bgmMatch) {
+        edits.push({
+          type: "bgm",
+          keywords: bgmMatch[1],
+          volume: bgmMatch[2] ? parseFloat(bgmMatch[2]) : 0.3,
+        });
+      }
     });
   }
 
@@ -178,6 +188,18 @@ export const parseFeatures = (text, durationLimit = 0) => {
     .map((edit) => {
       if (!edit || typeof edit !== "object") return null;
       const rawType = String(edit.type || "").toLowerCase();
+
+      // BGM 没有 start/end，单独处理
+      if (rawType === "bgm") {
+        return {
+          type: "bgm",
+          start: 0,
+          end: duration > 0 ? duration : 999,
+          keywords: String(edit.keywords || edit.mood || ""),
+          volume: Math.min(1, Math.max(0, Number(edit.volume ?? 0.3))),
+        };
+      }
+
       const start = timeToSeconds(edit.start);
       const end = timeToSeconds(edit.end);
       if (!Number.isFinite(start) || !Number.isFinite(end)) return null;

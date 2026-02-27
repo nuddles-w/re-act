@@ -31,8 +31,8 @@ export const applyEditsToTimeline = (timeline, edits, totalDuration = 0) => {
 
   const splitPoints = new Set();
   edits.forEach((edit) => {
-    // text 和 fade 编辑不影响视频片段的分割
-    if (edit?.type === "text" || edit?.type === "fade") return;
+    // text / fade / bgm 编辑不影响视频片段的分割
+    if (edit?.type === "text" || edit?.type === "fade" || edit?.type === "bgm") return;
     if (edit.start != null && edit.start > 0) splitPoints.add(Number(edit.start.toFixed(2)));
     if (edit.end != null && edit.end > 0) splitPoints.add(Number(edit.end.toFixed(2)));
   });
@@ -84,13 +84,24 @@ export const applyEditsToTimeline = (timeline, edits, totalDuration = 0) => {
       (e) => e.type === "split" && e.start <= clip.start + 0.2 && e.end >= clip.end - 0.2
     );
 
-    const edit = speedEdit || splitEdit;
+    const volumeEdit = edits.find(
+      (e) => e.type === "volume" && e.start <= clip.start + 0.2 && e.end >= clip.end - 0.2
+    );
 
-    if (!edit) return { ...clip, playbackRate: 1 };
+    const transformEdit = edits.find(
+      (e) => e.type === "transform" && e.start <= clip.start + 0.2 && e.end >= clip.end - 0.2
+    );
+
+    const edit = speedEdit || splitEdit;
+    const playbackRate = edit?.rate || 1;
+    const volume = volumeEdit?.volume ?? 1;
+    const transform = transformEdit?.transform || null;
 
     return {
       ...clip,
-      playbackRate: edit.rate || 1,
+      playbackRate,
+      volume,
+      transform,
       edit,
     };
   });
@@ -124,12 +135,14 @@ export const applyEditsToTimeline = (timeline, edits, totalDuration = 0) => {
       timelineEnd: mediaToTimelineTime(edit.end, clipsWithTimelinePositions),
     }));
 
+  const bgmEdits = edits.filter((e) => e?.type === "bgm");
+
   return {
     ...timeline,
     clips: clipsWithTimelinePositions,
     totalTimelineDuration: currentTimelineTime,
     textEdits,
     fadeEdits,
+    bgmEdits,
   };
 };
-

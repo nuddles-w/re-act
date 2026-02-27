@@ -10,6 +10,7 @@
   --border: #2d323a;
   --track-v1: #344465;
   --track-a1: #2d4c3b;
+  --track-bgm: #1a3d4a;
   --track-event: #4d3d2a;
   --track-text: #4a2d5c;
   --track-fade: #3a3a1a;
@@ -493,7 +494,103 @@ body {
   padding: 4px 8px;
   cursor: pointer;
   font-size: 16px;
+  white-space: nowrap;
+  position: relative;
 }
+
+.tool-btn[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: 120%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 50;
+}
+
+.tool-btn[data-tooltip]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 112%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 50;
+}
+
+.tool-btn[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+.tool-btn[data-tooltip]:hover::before {
+  opacity: 1;
+}
+
+.floating-tooltip {
+  position: fixed;
+  transform: translate(-50%, -10px);
+  background: rgba(0, 0, 0, 0.85);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  z-index: 999;
+  pointer-events: none;
+}
+
+.floating-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(0, 0, 0, 0.85);
+}
+
+.timeline-toolbar .toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-right: 8px;
+  position: relative;
+}
+
+.timeline-toolbar .toolbar-left::-webkit-scrollbar {
+  height: 6px;
+}
+
+.timeline-toolbar .toolbar-left::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+}
+
+.prepare-status {
+  display: inline-flex;
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.prepare-status.preparing { color: #ffc107; }
+.prepare-status.ready { color: #2ecc71; }
+.prepare-status.error { color: #ff4d4f; }
 
 .timeline-container {
   flex: 1;
@@ -761,6 +858,32 @@ body {
 
 .fade-edit-node.fade-out {
   background: linear-gradient(to left, #1a1a0a, var(--track-fade));
+}
+
+/* BGM track (B1) */
+.track-bgm {
+  background: color-mix(in srgb, var(--track-bgm) 40%, var(--surface) 60%);
+}
+
+.bgm-edit-node {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  background: var(--track-bgm);
+  border: 1px solid rgba(80, 200, 240, 0.5);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.bgm-label {
+  font-size: 11px;
+  color: rgba(160, 220, 240, 0.9);
+  padding: 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 文字叠加使用 inline style，CSS 中不再控制尺寸和位置（由 videoArea 计算保证与导出一致） */

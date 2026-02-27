@@ -12,6 +12,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import { createCanvas } from "canvas";
+import { searchAndDownloadBgm } from "./utils/fetchBgm.js";
 
 /**
  * 用 canvas 生成一张透明背景的文字 PNG，返回文件路径
@@ -301,6 +302,7 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
   const requestId = `export-${Date.now()}`;
   let tempInputPath = null;
   let tempOutputPath = null;
+  let bgmPath = null; // BGM 临时文件，用完清理
 
   try {
     const videoFile = req.file;
@@ -354,10 +356,11 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
       concatInputs += `[v${i}][a${i}]`;
     });
 
-    // 判断是否需要后处理（文字叠加 / 淡入淡出）
+    // 判断是否需要后处理（文字叠加 / 淡入淡出 / 背景音乐）
     const textEdits = Array.isArray(timeline.textEdits) ? timeline.textEdits.filter(e => e.text) : [];
     const fadeEdits = Array.isArray(timeline.fadeEdits) ? timeline.fadeEdits : [];
-    const needsPost = textEdits.length > 0 || fadeEdits.length > 0;
+    const bgmEdits  = Array.isArray(timeline.bgmEdits)  ? timeline.bgmEdits  : [];
+    const needsPost = textEdits.length > 0 || fadeEdits.length > 0 || bgmEdits.length > 0;
 
     const concatVLabel = needsPost ? "[concatv]" : "[outv]";
     const concatALabel = needsPost ? "[concata]" : "[outa]";
@@ -407,7 +410,31 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
           finalVideoLabel = nextLabel;
         });
 
-        finalAudioLabel = finalAudioLabel; // 音频不变
+      }
+
+      // ── 背景音乐混音 ──────────────────────────────────────────────
+      if (bgmEdits.length > 0) {
+        const bgmEdit = bgmEdits[0]; // 只取第一条 BGM 指令
+        try {
+          console.log(`[export:${requestId}] 搜索背景音乐: "${bgmEdit.keywords}"`);
+          const bgm = await searchAndDownloadBgm(bgmEdit.keywords, requestId);
+          console.log(`[export:${requestId}] BGM: ${bgm.title} - ${bgm.artist}`);
+          bgmPath = bgm.path;
+
+          const bgmVol = Math.min(1, Math.max(0, bgmEdit.volume ?? 0.3));
+          const totalDurSec = timeline.totalTimelineDuration || 60;
+          const fadeOutSt = Math.max(0, totalDurSec - 2).toFixed(2);
+          // BGM 输入 index = 1（视频）+ textPngPaths.length
+          const bgmIdx = 1 + textPngPaths.length;
+
+          // 对 BGM 单独做音量 + 淡入淡出，再与原声 amix
+          filterComplex += `;[${bgmIdx}:a]volume=${bgmVol},afade=t=in:d=1:st=0,afade=t=out:st=${fadeOutSt}:d=2[bgmaudio]`;
+          filterComplex += `;${finalAudioLabel}[bgmaudio]amix=inputs=2:duration=first:normalize=0[outa]`;
+          finalAudioLabel = "[outa]";
+        } catch (e) {
+          console.warn(`[export:${requestId}] BGM 获取失败（跳过）: ${e.message}`);
+          // BGM 失败不阻断导出，静默跳过
+        }
       }
 
       // 如果视频标签还没落到 [outv]，最终对齐
@@ -428,6 +455,10 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
     textPngPaths.forEach(p => {
       extraInputs.push("-loop", "1", "-t", totalDur, "-i", p);
     });
+    // BGM 作为额外音频输入（stream_loop 无限循环，-t 裁剪到视频时长）
+    if (bgmPath) {
+      extraInputs.push("-stream_loop", "-1", "-t", totalDur, "-i", bgmPath);
+    }
 
     const args = [
       "-y",
@@ -440,8 +471,8 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
       "-b:v", "4000k",             // 码率
       "-c:a", "aac",
       "-b:a", "128k",
-      // 若有文字叠加，需显式限制输出时长（PNG loop 会延长输出）
-      ...(textPngPaths.length > 0 ? ["-t", String(timeline.totalTimelineDuration)] : []),
+      // 若有文字叠加或 BGM loop，需显式限制输出时长（防止无限循环卡住）
+      ...((textPngPaths.length > 0 || bgmPath) ? ["-t", String(timeline.totalTimelineDuration)] : []),
       tempOutputPath
     ];
 
@@ -457,20 +488,21 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
     ffmpeg.on("close", (code) => {
       if (code === 0) {
         console.log(`[export:${requestId}] Render success`);
+        const allExtras = [...textPngPaths, ...(bgmPath ? [bgmPath] : [])];
         res.download(tempOutputPath, `${videoFile.originalname.split('.')[0]}_edited.mp4`, () => {
-          cleanup(tempInputPath, tempOutputPath, textPngPaths);
+          cleanup(tempInputPath, tempOutputPath, allExtras);
         });
       } else {
         console.error(`[export:${requestId}] Render failed with code ${code}`);
         res.status(500).json({ error: "render_failed", code });
-        cleanup(tempInputPath, tempOutputPath, textPngPaths);
+        cleanup(tempInputPath, tempOutputPath, [...textPngPaths, ...(bgmPath ? [bgmPath] : [])]);
       }
     });
 
   } catch (error) {
     console.error(`[export:${requestId}] Error:`, error);
     res.status(500).json({ error: "export_internal_error", message: error.message });
-    cleanup(tempInputPath, tempOutputPath, textPngPaths);
+    cleanup(tempInputPath, tempOutputPath, [...textPngPaths, ...(bgmPath ? [bgmPath] : [])]);
   }
 });
 

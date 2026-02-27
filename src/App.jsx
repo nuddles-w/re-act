@@ -33,6 +33,19 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [prepareId, setPrepareId] = useState(null);
   const [prepareStatus, setPrepareStatus] = useState("idle"); // idle | preparing | ready | error
+  const [manualEdits, setManualEdits] = useState([]);
+  const [activeClipState, setActiveClipState] = useState(null);
+  const [fadeOpacity, setFadeOpacity] = useState(1);
+  const playheadTimeRef = useRef(0);
+  const playheadRafRef = useRef(null);
+  const latestTimeRef = useRef(0);
+  const [tooltip, setTooltip] = useState({ visible: false, text: "", x: 0, y: 0 });
+  const tooltipRafRef = useRef(null);
+  const tooltipTargetRef = useRef(null);
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+  const activeClipRef = useRef(null);
+  const fadeOpacityRef = useRef(1);
   const isDraggingRef = useRef(false);
   const timelineRef = useRef(null);
   const previewContainerRef = useRef(null);
@@ -75,6 +88,10 @@ export default function App() {
   const [thumbnails, setThumbnails] = useState([]);
   const [thumbnailStatus, setThumbnailStatus] = useState("idle");
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
+  const combinedEdits = useMemo(
+    () => [...(features?.edits || []), ...manualEdits],
+    [features, manualEdits]
+  );
 
   const appendChatMessage = (message) => {
     setChatMessages((prev) => [
@@ -94,10 +111,11 @@ export default function App() {
   }, [videoUrl]);
 
   useEffect(() => {
-    if (!features) return;
-    const baseTimeline = buildTimeline(features, intent);
-    setTimeline(applyEditsToTimeline(baseTimeline, features.edits || [], duration));
-  }, [features, intent, duration]);
+    if (!duration) return;
+    const baseFeatures = features || extractFeaturesFromVideo(file, duration);
+    const baseTimeline = buildTimeline(baseFeatures, intent);
+    setTimeline(applyEditsToTimeline(baseTimeline, combinedEdits, duration));
+  }, [features, intent, duration, combinedEdits, file]);
 
   useEffect(() => {
     if (!videoUrl || !duration) {
@@ -170,6 +188,9 @@ export default function App() {
     setActiveClipId(null);
     setPrepareId(null);
     setPrepareStatus("idle");
+    setManualEdits([]);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
 
     // Gemini 预上传：用户选完文件立刻在后台开始压缩+上传
     const eagerEnabled = import.meta.env.VITE_GEMINI_EAGER_UPLOAD === "true";
@@ -204,10 +225,14 @@ export default function App() {
   const handleClipPlay = (clip) => {
     if (!videoRef.current) return;
     setActiveClipId(clip.id);
+    setActiveClipState(clip);
+    activeClipRef.current = clip;
     endTimeRef.current = clip.end;
     videoRef.current.currentTime = clip.start;
     videoRef.current.playbackRate = clip.playbackRate || 1;
+    videoRef.current.volume = clip.volume ?? 1;
     videoRef.current.play();
+    playheadTimeRef.current = clip.start;
     setPlayheadTime(clip.start);
   };
 
@@ -232,9 +257,7 @@ export default function App() {
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const currentTime = videoRef.current.currentTime;
-    
-    // 更新轨道上的播放头位置（转换为轨道时间）
-    setPlayheadTime(mediaToTimeline(currentTime));
+    latestTimeRef.current = currentTime;
     
     // 动态倍率同步逻辑
     if (timeline && timeline.clips) {
@@ -247,14 +270,28 @@ export default function App() {
         if (videoRef.current.playbackRate !== targetRate) {
           videoRef.current.playbackRate = targetRate;
         }
-        if (activeClipId !== currentClip.id) {
+        const targetVolume = currentClip.volume ?? 1;
+        if (videoRef.current.volume !== targetVolume) {
+          videoRef.current.volume = targetVolume;
+        }
+        if (activeClipRef.current?.id !== currentClip.id) {
           setActiveClipId(currentClip.id);
+          setActiveClipState(currentClip);
+          activeClipRef.current = currentClip;
+        } else if (activeClipRef.current !== currentClip) {
+          setActiveClipState(currentClip);
+          activeClipRef.current = currentClip;
         }
       } else {
         if (videoRef.current.playbackRate !== 1) {
           videoRef.current.playbackRate = 1;
         }
+        if (videoRef.current.volume !== 1) {
+          videoRef.current.volume = 1;
+        }
         setActiveClipId(null);
+        setActiveClipState(null);
+        activeClipRef.current = null;
       }
     }
 
@@ -262,7 +299,34 @@ export default function App() {
       videoRef.current.pause();
       setIsPlaying(false);
       videoRef.current.playbackRate = 1;
+      videoRef.current.volume = 1;
       endTimeRef.current = null;
+    }
+
+    if (!playheadRafRef.current) {
+      playheadRafRef.current = requestAnimationFrame(() => {
+        playheadRafRef.current = null;
+        const latestTime = latestTimeRef.current;
+        const nextPlayhead = mediaToTimeline(latestTime);
+        if (Math.abs(nextPlayhead - playheadTimeRef.current) > 0.02) {
+          playheadTimeRef.current = nextPlayhead;
+          setPlayheadTime(nextPlayhead);
+        }
+
+        const fadeEdit = combinedEdits.find(
+          (e) => e.type === "fade" && latestTime >= e.start && latestTime <= e.end
+        );
+        let nextFadeOpacity = 1;
+        if (fadeEdit) {
+          const span = Math.max(0.001, fadeEdit.end - fadeEdit.start);
+          const progress = (latestTime - fadeEdit.start) / span;
+          nextFadeOpacity = fadeEdit.mode === "out" ? Math.max(0, 1 - progress) : Math.min(1, progress);
+        }
+        if (Math.abs(nextFadeOpacity - fadeOpacityRef.current) > 0.02) {
+          fadeOpacityRef.current = nextFadeOpacity;
+          setFadeOpacity(nextFadeOpacity);
+        }
+      });
     }
   };
 
@@ -296,7 +360,25 @@ export default function App() {
     const targetMediaTime = timelineToMedia(targetTimelineTime);
     
     videoRef.current.currentTime = targetMediaTime;
+    playheadTimeRef.current = targetTimelineTime;
     setPlayheadTime(targetTimelineTime);
+
+    const targetClip = timeline.clips.find(
+      (clip) => targetMediaTime >= clip.start - 0.05 && targetMediaTime <= clip.end + 0.05
+    );
+    if (targetClip) {
+      setActiveClipId(targetClip.id);
+      setActiveClipState(targetClip);
+      activeClipRef.current = targetClip;
+      videoRef.current.playbackRate = targetClip.playbackRate || 1;
+      videoRef.current.volume = targetClip.volume ?? 1;
+    } else {
+      setActiveClipId(null);
+      setActiveClipState(null);
+      activeClipRef.current = null;
+      videoRef.current.playbackRate = 1;
+      videoRef.current.volume = 1;
+    }
   };
 
   const handleTimelineMouseDown = (e) => {
@@ -328,13 +410,30 @@ export default function App() {
     endTimeRef.current = event.end;
     videoRef.current.currentTime = event.start;
     videoRef.current.play();
+    playheadTimeRef.current = event.start;
     setPlayheadTime(event.start);
   };
+
+  useEffect(() => {
+    return () => {
+      if (playheadRafRef.current) {
+        cancelAnimationFrame(playheadRafRef.current);
+        playheadRafRef.current = null;
+      }
+      if (tooltipRafRef.current) {
+        cancelAnimationFrame(tooltipRafRef.current);
+        tooltipRafRef.current = null;
+      }
+    };
+  }, []);
 
   const analyzeVideo = async () => {
     if (!file || !duration) return;
     setAnalysisStatus("analyzing");
     setChatMessages([]);
+    setManualEdits([]);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
     appendChatMessage({
       role: "user",
       time: new Date().toLocaleTimeString(),
@@ -438,6 +537,298 @@ export default function App() {
           ? '⚠️ Gemini API 配额已耗尽（429）。建议勾选下方「Mock 调试模式」继续验证 UI 逻辑。'
           : "识别异常，已切换为本地基础解析。",
       });
+    }
+  };
+
+  const applyManualEdits = (nextEdits) => {
+    const prev = manualEdits;
+    undoStackRef.current.push({ prev, next: nextEdits });
+    redoStackRef.current = [];
+    setManualEdits(nextEdits);
+  };
+
+  const handleUndo = () => {
+    const command = undoStackRef.current.pop();
+    if (!command) return;
+    redoStackRef.current.push(command);
+    setManualEdits(command.prev);
+  };
+
+  const handleRedo = () => {
+    const command = redoStackRef.current.pop();
+    if (!command) return;
+    undoStackRef.current.push(command);
+    setManualEdits(command.next);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      const isUndo = (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z";
+      const isRedo = (e.metaKey || e.ctrlKey) && (e.shiftKey && e.key.toLowerCase() === "z");
+      if (isUndo) {
+        e.preventDefault();
+        handleUndo();
+      }
+      if (isRedo) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  const getActiveClip = () => {
+    if (!timeline?.clips?.length) return null;
+    const byId = timeline.clips.find((clip) => clip.id === activeClipId);
+    if (byId) return byId;
+    const time = videoRef.current?.currentTime ?? 0;
+    return (
+      timeline.clips.find((clip) => time >= clip.start - 0.05 && time <= clip.end + 0.05) ||
+      timeline.clips[0] ||
+      null
+    );
+  };
+
+  const replaceEdit = (edits, predicate, nextEdit) => {
+    const kept = edits.filter((edit) => !predicate(edit));
+    return [...kept, nextEdit];
+  };
+
+  const normalizeTime = (value) => Number(value.toFixed(2));
+
+  const updateSpeed = (rate) => {
+    const clip = getActiveClip();
+    if (!clip) return;
+    const nextEdit = {
+      type: "speed",
+      start: normalizeTime(clip.start),
+      end: normalizeTime(clip.end),
+      rate,
+    };
+    const nextEdits = replaceEdit(
+      manualEdits,
+      (e) =>
+        e.type === "speed" &&
+        Math.abs(e.start - nextEdit.start) < 0.02 &&
+        Math.abs(e.end - nextEdit.end) < 0.02,
+      nextEdit
+    );
+    applyManualEdits(nextEdits);
+  };
+
+  const addSplit = () => {
+    if (!videoRef.current) return;
+    const time = normalizeTime(videoRef.current.currentTime || 0);
+    if (!time) return;
+    applyManualEdits([...manualEdits, { type: "split", start: time, end: time }]);
+  };
+
+  const deleteClip = () => {
+    const clip = getActiveClip();
+    if (!clip) return;
+    const nextEdit = {
+      type: "delete",
+      start: normalizeTime(clip.start),
+      end: normalizeTime(clip.end),
+    };
+    const nextEdits = replaceEdit(
+      manualEdits,
+      (e) =>
+        e.type === "delete" &&
+        Math.abs(e.start - nextEdit.start) < 0.02 &&
+        Math.abs(e.end - nextEdit.end) < 0.02,
+      nextEdit
+    );
+    applyManualEdits(nextEdits);
+  };
+
+  const trimClip = (direction) => {
+    const clip = getActiveClip();
+    if (!clip) return;
+    const span = Math.max(0.3, Math.min(1, (clip.end - clip.start) * 0.2));
+    let start = clip.start;
+    let end = clip.end;
+    if (direction === "in") {
+      end = Math.min(clip.end, clip.start + span);
+    } else {
+      start = Math.max(clip.start, clip.end - span);
+    }
+    if (end - start <= 0.05) return;
+    const nextEdit = {
+      type: "delete",
+      start: normalizeTime(start),
+      end: normalizeTime(end),
+    };
+    const nextEdits = replaceEdit(
+      manualEdits,
+      (e) =>
+        e.type === "delete" &&
+        Math.abs(e.start - nextEdit.start) < 0.02 &&
+        Math.abs(e.end - nextEdit.end) < 0.02,
+      nextEdit
+    );
+    applyManualEdits(nextEdits);
+  };
+
+  const addFade = (mode) => {
+    const clip = getActiveClip();
+    if (!clip) return;
+    const window = Math.min(0.6, clip.end - clip.start);
+    if (window <= 0.05) return;
+    const start = mode === "in" ? clip.start : clip.end - window;
+    const end = mode === "in" ? clip.start + window : clip.end;
+    const nextEdit = {
+      type: "fade",
+      start: normalizeTime(start),
+      end: normalizeTime(end),
+      mode,
+    };
+    const nextEdits = replaceEdit(
+      manualEdits,
+      (e) =>
+        e.type === "fade" &&
+        e.mode === mode &&
+        Math.abs(e.start - nextEdit.start) < 0.02 &&
+        Math.abs(e.end - nextEdit.end) < 0.02,
+      nextEdit
+    );
+    applyManualEdits(nextEdits);
+  };
+
+  const updateVolume = (volume) => {
+    const clip = getActiveClip();
+    if (!clip) return;
+    const nextEdit = {
+      type: "volume",
+      start: normalizeTime(clip.start),
+      end: normalizeTime(clip.end),
+      volume: Math.min(1, Math.max(0, volume)),
+    };
+    const nextEdits = replaceEdit(
+      manualEdits,
+      (e) =>
+        e.type === "volume" &&
+        Math.abs(e.start - nextEdit.start) < 0.02 &&
+        Math.abs(e.end - nextEdit.end) < 0.02,
+      nextEdit
+    );
+    applyManualEdits(nextEdits);
+  };
+
+  const updateTransform = (updater) => {
+    const clip = getActiveClip();
+    if (!clip) return;
+    const existing = manualEdits.find(
+      (e) =>
+        e.type === "transform" &&
+        Math.abs(e.start - clip.start) < 0.02 &&
+        Math.abs(e.end - clip.end) < 0.02
+    );
+    const base = existing?.transform || {};
+    const nextTransform = updater(base);
+    const nextEdit = {
+      type: "transform",
+      start: normalizeTime(clip.start),
+      end: normalizeTime(clip.end),
+      transform: nextTransform,
+    };
+    const nextEdits = replaceEdit(
+      manualEdits,
+      (e) =>
+        e.type === "transform" &&
+        Math.abs(e.start - nextEdit.start) < 0.02 &&
+        Math.abs(e.end - nextEdit.end) < 0.02,
+      nextEdit
+    );
+    applyManualEdits(nextEdits);
+  };
+
+  const zoomClip = (delta) => {
+    updateTransform((base) => ({
+      ...base,
+      scale: Math.min(3, Math.max(0.5, (base.scale || 1) + delta)),
+    }));
+  };
+
+  const moveClip = (dx, dy) => {
+    updateTransform((base) => ({
+      ...base,
+      x: (base.x || 0) + dx,
+      y: (base.y || 0) + dy,
+    }));
+  };
+
+  const rotateClip = () => {
+    updateTransform((base) => ({
+      ...base,
+      rotate: ((base.rotate || 0) + 90) % 360,
+    }));
+  };
+
+  const flipClip = (axis) => {
+    updateTransform((base) => ({
+      ...base,
+      flipX: axis === "x" ? !base.flipX : base.flipX,
+      flipY: axis === "y" ? !base.flipY : base.flipY,
+    }));
+  };
+
+  const resetTransform = () => {
+    updateTransform(() => ({
+      scale: 1,
+      x: 0,
+      y: 0,
+      rotate: 0,
+      flipX: false,
+      flipY: false,
+      crop: { top: 0, right: 0, bottom: 0, left: 0 },
+    }));
+  };
+
+  const cropSquare = () => {
+    const el = videoRef.current;
+    const aspect = el?.videoWidth && el?.videoHeight ? el.videoWidth / el.videoHeight : 1;
+    let crop = { top: 0, right: 0, bottom: 0, left: 0 };
+    if (aspect > 1) {
+      const inset = (1 - 1 / aspect) / 2;
+      crop = { top: 0, bottom: 0, left: inset, right: inset };
+    } else if (aspect < 1) {
+      const inset = (1 - aspect) / 2;
+      crop = { left: 0, right: 0, top: inset, bottom: inset };
+    }
+    updateTransform((base) => ({
+      ...base,
+      crop,
+    }));
+  };
+
+  const handleToolbarMouseMove = (e) => {
+    const target = e.target?.closest?.(".tool-btn[data-tooltip]");
+    tooltipTargetRef.current = target || null;
+    if (tooltipRafRef.current) return;
+    tooltipRafRef.current = requestAnimationFrame(() => {
+      tooltipRafRef.current = null;
+      const current = tooltipTargetRef.current;
+      if (!current) {
+        if (tooltip.visible) {
+          setTooltip((prev) => ({ ...prev, visible: false }));
+        }
+        return;
+      }
+      const text = current.getAttribute("data-tooltip") || "";
+      if (!text) return;
+      const rect = current.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top;
+      setTooltip({ visible: true, text, x, y });
+    });
+  };
+
+  const handleToolbarMouseLeave = () => {
+    tooltipTargetRef.current = null;
+    if (tooltip.visible) {
+      setTooltip((prev) => ({ ...prev, visible: false }));
     }
   };
 
@@ -613,6 +1004,30 @@ export default function App() {
                   onPlay={() => setIsPlaying(true)}
                   onPause={() => setIsPlaying(false)}
                   onClick={togglePlay}
+                  style={{
+                    opacity: fadeOpacity,
+                    transform: (() => {
+                      const transform = activeClipState?.transform || {};
+                      const scale = transform.scale || 1;
+                      const x = transform.x || 0;
+                      const y = transform.y || 0;
+                      const rotate = transform.rotate || 0;
+                      const flipX = transform.flipX ? -1 : 1;
+                      const flipY = transform.flipY ? -1 : 1;
+                      return `translate(${x}%, ${y}%) scale(${scale * flipX}, ${scale * flipY}) rotate(${rotate}deg)`;
+                    })(),
+                    clipPath: (() => {
+                      const transform = activeClipState?.transform || {};
+                      const crop = transform.crop;
+                      if (!crop) return "none";
+                      const top = Math.max(0, Math.min(1, crop.top || 0));
+                      const right = Math.max(0, Math.min(1, crop.right || 0));
+                      const bottom = Math.max(0, Math.min(1, crop.bottom || 0));
+                      const left = Math.max(0, Math.min(1, crop.left || 0));
+                      return `inset(${top * 100}% ${right * 100}% ${bottom * 100}% ${left * 100}%)`;
+                    })(),
+                    transformOrigin: "center center",
+                  }}
                 />
                 {videoRef.current && videoRef.current.playbackRate !== 1 && (
                   <div className="playback-speed-overlay">
@@ -686,10 +1101,32 @@ export default function App() {
 
       <footer className="editor-timeline">
         <div className="timeline-toolbar">
-          <div className="toolbar-left">
-            <button className="tool-btn">✂️</button>
-            <button className="tool-btn">↶</button>
-            <button className="tool-btn">↷</button>
+          <div className="toolbar-left" onMouseMove={handleToolbarMouseMove} onMouseLeave={handleToolbarMouseLeave}>
+            <button className="tool-btn" onClick={handleUndo} data-tooltip="Undo (⌘Z)" title="Undo (⌘Z)">↶</button>
+            <button className="tool-btn" onClick={handleRedo} data-tooltip="Redo (⇧⌘Z)" title="Redo (⇧⌘Z)">↷</button>
+            <button className="tool-btn" onClick={addSplit} data-tooltip="Split" title="Split">✂️</button>
+            <button className="tool-btn" onClick={deleteClip} data-tooltip="Delete" title="Delete">🗑️</button>
+            <button className="tool-btn" onClick={() => trimClip("in")} data-tooltip="Trim In" title="Trim In">⏮️</button>
+            <button className="tool-btn" onClick={() => trimClip("out")} data-tooltip="Trim Out" title="Trim Out">⏭️</button>
+            <button className="tool-btn" onClick={() => updateSpeed(0.5)} data-tooltip="Speed 0.5x" title="Speed 0.5x">🐢</button>
+            <button className="tool-btn" onClick={() => updateSpeed(1)} data-tooltip="Speed 1x" title="Speed 1x">⏺️</button>
+            <button className="tool-btn" onClick={() => updateSpeed(2)} data-tooltip="Speed 2x" title="Speed 2x">🐇</button>
+            <button className="tool-btn" onClick={() => addFade("in")} data-tooltip="Fade In" title="Fade In">🌅</button>
+            <button className="tool-btn" onClick={() => addFade("out")} data-tooltip="Fade Out" title="Fade Out">🌇</button>
+            <button className="tool-btn" onClick={() => updateVolume(0)} data-tooltip="Mute" title="Mute">🔇</button>
+            <button className="tool-btn" onClick={() => updateVolume(0.5)} data-tooltip="Volume 50%" title="Volume 50%">🔉</button>
+            <button className="tool-btn" onClick={() => updateVolume(1)} data-tooltip="Volume 100%" title="Volume 100%">🔊</button>
+            <button className="tool-btn" onClick={() => zoomClip(0.1)} data-tooltip="Zoom In" title="Zoom In">🔍➕</button>
+            <button className="tool-btn" onClick={() => zoomClip(-0.1)} data-tooltip="Zoom Out" title="Zoom Out">🔍➖</button>
+            <button className="tool-btn" onClick={() => moveClip(-5, 0)} data-tooltip="Move Left" title="Move Left">⬅️</button>
+            <button className="tool-btn" onClick={() => moveClip(5, 0)} data-tooltip="Move Right" title="Move Right">➡️</button>
+            <button className="tool-btn" onClick={() => moveClip(0, -5)} data-tooltip="Move Up" title="Move Up">⬆️</button>
+            <button className="tool-btn" onClick={() => moveClip(0, 5)} data-tooltip="Move Down" title="Move Down">⬇️</button>
+            <button className="tool-btn" onClick={rotateClip} data-tooltip="Rotate" title="Rotate">🔄</button>
+            <button className="tool-btn" onClick={() => flipClip("x")} data-tooltip="Flip Horizontal" title="Flip Horizontal">↔️</button>
+            <button className="tool-btn" onClick={() => flipClip("y")} data-tooltip="Flip Vertical" title="Flip Vertical">↕️</button>
+            <button className="tool-btn" onClick={cropSquare} data-tooltip="Crop 1:1" title="Crop 1:1">▢</button>
+            <button className="tool-btn" onClick={resetTransform} data-tooltip="Reset" title="Reset">♻️</button>
           </div>
           <div className="toolbar-right">
             <span>100%</span>
@@ -834,9 +1271,32 @@ export default function App() {
                 <div className="waveform-placeholder" />
               </div>
             </div>
+
+            {timeline?.bgmEdits?.length > 0 && (
+              <div className="track track-bgm">
+                <div className="track-id">B1</div>
+                <div className="track-content">
+                  {timeline.bgmEdits.map((edit, i) => (
+                    <div
+                      key={i}
+                      className="bgm-edit-node"
+                      style={{ left: 0, width: "100%" }}
+                      title={`BGM: ${edit.keywords} (vol: ${edit.volume ?? 0.3})`}
+                    >
+                      <span className="bgm-label">♪ {edit.keywords}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </footer>
+      {tooltip.visible && (
+        <div className="floating-tooltip" style={{ left: `${tooltip.x}px`, top: `${tooltip.y}px` }}>
+          {tooltip.text}
+        </div>
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ export const AGENT_SYSTEM_PROMPT = `你是一个专业的视频剪辑 Agent。�
 - add_text(startTime: number, endTime: number, text: string, position?: string): 在视频指定时间段叠加文字标题，position 可选值为 "top"、"center"、"bottom"，默认 "bottom"。
 - fade_in(startTime: number, duration: number): 在 startTime 处添加持续 duration 秒的淡入效果（画面从黑色渐显）。
 - fade_out(startTime: number, duration: number): 在 startTime 处添加持续 duration 秒的淡出效果（画面渐隐至黑色）。
+- add_bgm(keywords: string, volume?: number): 根据视频内容和用户意图搜索并添加背景音乐。keywords 为描述音乐情绪/风格的英文关键词（如 "happy upbeat pop" / "calm piano ambient" / "epic cinematic"），volume 为背景音乐音量（0-1，默认 0.3，原声保留）。
 
 示例 1：
 User: "帮我把捣碎鸡蛋的片段进行两倍加速"
@@ -64,7 +65,8 @@ Final Answer: 已删除开头 4s 无聊片段，在精彩高光（8~15s）叠加
     { "type": "delete", "start": 12.0, "end": 16.5 },
     { "type": "text", "start": 8.0, "end": 15.0, "text": "精彩高光时刻", "position": "bottom" },
     { "type": "fade", "start": 0.0, "end": 1.5, "direction": "in" },
-    { "type": "fade", "start": 28.5, "end": 30.0, "direction": "out" }
+    { "type": "fade", "start": 28.5, "end": 30.0, "direction": "out" },
+    { "type": "bgm", "keywords": "happy upbeat pop", "volume": 0.3 }
   ]
 }
 注意：Action 必须是工具名+参数。Observation 会由系统提供，但在当前响应中请填入你的预期结果。
