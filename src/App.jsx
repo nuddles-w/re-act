@@ -36,6 +36,7 @@ export default function App() {
   const [manualEdits, setManualEdits] = useState([]);
   const [activeClipState, setActiveClipState] = useState(null);
   const [fadeOpacity, setFadeOpacity] = useState(1);
+  const [sessionId, setSessionId] = useState(null); // 会话 ID，用于记忆上下文
   const playheadTimeRef = useRef(0);
   const playheadRafRef = useRef(null);
   const latestTimeRef = useRef(0);
@@ -50,6 +51,13 @@ export default function App() {
   const timelineRef = useRef(null);
   const previewContainerRef = useRef(null);
   const [videoArea, setVideoArea] = useState(null); // 视频在预览区的实际渲染位置和尺寸
+  const [timelineScale, setTimelineScale] = useState(1);
+  const [colorAdjust, setColorAdjust] = useState({ brightness: 0, contrast: 0, saturation: 0, hue: 0, sharpness: 0 });
+  const [activeFilter, setActiveFilter] = useState("none");
+  const [activeRightPanel, setActiveRightPanel] = useState(null); // 'adjust' | null
+  const [exportFormat, setExportFormat] = useState("original"); // 'original' | '16:9' | '9:16' | '1:1'
+  const [exportProgress, setExportProgress] = useState({ status: "idle", percent: 0, message: "" });
+  const trimDragRef = useRef(null);
 
   // 计算视频在 preview-container 内的实际渲染区域（考虑 object-fit: contain 的留白）
   const updateVideoArea = useCallback(() => {
@@ -92,6 +100,66 @@ export default function App() {
     () => [...(features?.edits || []), ...manualEdits],
     [features, manualEdits]
   );
+  const computedFilter = useMemo(() => {
+    const parts = [];
+    if (colorAdjust.brightness !== 0) parts.push(`brightness(${1 + colorAdjust.brightness})`);
+    if (colorAdjust.contrast !== 0) parts.push(`contrast(${1 + colorAdjust.contrast})`);
+    if (colorAdjust.saturation !== 0) parts.push(`saturate(${1 + colorAdjust.saturation})`);
+    if (colorAdjust.hue !== 0) parts.push(`hue-rotate(${colorAdjust.hue}deg)`);
+    if (activeFilter === "bw") parts.push("grayscale(1)");
+    else if (activeFilter === "vintage") parts.push("sepia(0.5) brightness(1.05) contrast(1.1)");
+    else if (activeFilter === "cool") parts.push("hue-rotate(20deg) saturate(1.1) brightness(1.05)");
+    else if (activeFilter === "warm") parts.push("sepia(0.25) saturate(1.2) brightness(1.05)");
+    else if (activeFilter === "vivid") parts.push("saturate(1.6) contrast(1.1)");
+    else if (activeFilter === "cinematic") parts.push("sepia(0.15) contrast(1.15) brightness(0.95)");
+    return parts.length ? parts.join(" ") : "none";
+  }, [colorAdjust, activeFilter]);
+
+  const clipIndex = useMemo(() => {
+    if (!timeline?.clips?.length) return null;
+    const clips = timeline.clips;
+    return {
+      clips,
+      mediaStart: clips.map((c) => c.start),
+      mediaEnd: clips.map((c) => c.end),
+      timelineStart: clips.map((c) => c.timelineStart),
+      timelineEnd: clips.map((c) => c.timelineStart + c.displayDuration),
+    };
+  }, [timeline]);
+
+  const findClipByMediaTime = (time) => {
+    if (!clipIndex) return null;
+    let lo = 0;
+    let hi = clipIndex.mediaStart.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (time < clipIndex.mediaStart[mid] - 0.01) {
+        hi = mid - 1;
+      } else if (time > clipIndex.mediaEnd[mid] + 0.01) {
+        lo = mid + 1;
+      } else {
+        return clipIndex.clips[mid];
+      }
+    }
+    return null;
+  };
+
+  const findClipByTimelineTime = (time) => {
+    if (!clipIndex) return null;
+    let lo = 0;
+    let hi = clipIndex.timelineStart.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (time < clipIndex.timelineStart[mid] - 0.01) {
+        hi = mid - 1;
+      } else if (time > clipIndex.timelineEnd[mid] + 0.01) {
+        lo = mid + 1;
+      } else {
+        return clipIndex.clips[mid];
+      }
+    }
+    return null;
+  };
 
   const appendChatMessage = (message) => {
     setChatMessages((prev) => [
@@ -112,8 +180,18 @@ export default function App() {
 
   useEffect(() => {
     if (!duration) return;
-    const baseFeatures = features || extractFeaturesFromVideo(file, duration);
-    const baseTimeline = buildTimeline(baseFeatures, intent);
+    let baseTimeline;
+    if (features) {
+      // AI 分析完成后：根据 features 构建多段时间线
+      baseTimeline = buildTimeline(features, intent);
+    } else {
+      // 未进行 AI 分析：展示完整视频为一段，不做任何剪切
+      baseTimeline = {
+        clips: [{ id: "base-clip", start: 0, end: duration, duration, energy: 0.5, label: "Original Video", reason: "完整视频" }],
+        totalDuration: duration,
+        targetDuration: duration,
+      };
+    }
     setTimeline(applyEditsToTimeline(baseTimeline, combinedEdits, duration));
   }, [features, intent, duration, combinedEdits, file]);
 
@@ -155,7 +233,10 @@ export default function App() {
         }
         video.addEventListener("loadedmetadata", resolve, { once: true });
       });
-      const count = 25;
+      const count =
+        duration >= 1800 ? 10 :
+        duration >= 900 ? 12 :
+        duration >= 300 ? 16 : 25;
       const results = [];
       for (let i = 0; i < count; i += 1) {
         const time = Math.min(duration - 0.05, (duration / count) * i + 0.1);
@@ -164,6 +245,9 @@ export default function App() {
           if (!cancelled) results.push({ time, image });
         } catch (error) {
           if (!cancelled) results.push({ time, image: "" });
+        }
+        if (typeof requestIdleCallback === "function") {
+          await new Promise((resolve) => requestIdleCallback(resolve));
         }
       }
       if (!cancelled) {
@@ -189,6 +273,7 @@ export default function App() {
     setPrepareId(null);
     setPrepareStatus("idle");
     setManualEdits([]);
+    setSessionId(null); // 重置会话 ID
     undoStackRef.current = [];
     redoStackRef.current = [];
 
@@ -239,7 +324,7 @@ export default function App() {
   // 转换函数：素材时间 -> 轨道时间
   const mediaToTimeline = (mTime) => {
     if (!timeline || !timeline.clips) return mTime;
-    const clip = timeline.clips.find(c => mTime >= c.start - 0.01 && mTime <= c.end + 0.01);
+    const clip = findClipByMediaTime(mTime);
     if (!clip) return mTime;
     const offsetInClip = mTime - clip.start;
     return clip.timelineStart + (offsetInClip / (clip.playbackRate || 1));
@@ -248,7 +333,7 @@ export default function App() {
   // 转换函数：轨道时间 -> 素材时间
   const timelineToMedia = (tTime) => {
     if (!timeline || !timeline.clips) return tTime;
-    const clip = timeline.clips.find(c => tTime >= c.timelineStart - 0.01 && tTime <= c.timelineStart + c.displayDuration + 0.01);
+    const clip = findClipByTimelineTime(tTime);
     if (!clip) return tTime;
     const offsetInTimeline = tTime - clip.timelineStart;
     return clip.start + (offsetInTimeline * (clip.playbackRate || 1));
@@ -261,9 +346,7 @@ export default function App() {
     
     // 动态倍率同步逻辑
     if (timeline && timeline.clips) {
-      const currentClip = timeline.clips.find(
-        clip => currentTime >= clip.start - 0.05 && currentTime <= clip.end + 0.05
-      );
+      const currentClip = findClipByMediaTime(currentTime);
       
       if (currentClip) {
         const targetRate = currentClip.playbackRate || 1;
@@ -308,10 +391,9 @@ export default function App() {
         playheadRafRef.current = null;
         const latestTime = latestTimeRef.current;
         const nextPlayhead = mediaToTimeline(latestTime);
-        if (Math.abs(nextPlayhead - playheadTimeRef.current) > 0.02) {
-          playheadTimeRef.current = nextPlayhead;
-          setPlayheadTime(nextPlayhead);
-        }
+        // 移除阈值判断，每帧都更新以保证流畅
+        playheadTimeRef.current = nextPlayhead;
+        setPlayheadTime(nextPlayhead);
 
         const fadeEdit = combinedEdits.find(
           (e) => e.type === "fade" && latestTime >= e.start && latestTime <= e.end
@@ -335,14 +417,12 @@ export default function App() {
     if (isPlaying) {
       videoRef.current.pause();
     } else {
-      // 开始播放前预设正确的倍率
       if (timeline && timeline.clips) {
         const currentTime = videoRef.current.currentTime;
-        const currentClip = timeline.clips.find(
-          clip => currentTime >= clip.start - 0.05 && currentTime <= clip.end + 0.05
-        );
+        const currentClip = findClipByMediaTime(currentTime);
         if (currentClip) {
           videoRef.current.playbackRate = currentClip.playbackRate || 1;
+          videoRef.current.volume = currentClip.volume ?? 1;
         }
       }
       videoRef.current.play();
@@ -353,19 +433,19 @@ export default function App() {
   const handleTimelineScrub = (e) => {
     if (!timeline || !timeline.totalTimelineDuration || !timelineRef.current || !videoRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percentage = Math.max(0, Math.min(1, x / rect.width));
-    
+    const scrollLeft = timelineRef.current.scrollLeft;
+    const x = e.clientX - rect.left + scrollLeft;
+    const totalWidth = rect.width * timelineScale;
+    const percentage = Math.max(0, Math.min(1, x / totalWidth));
+
     const targetTimelineTime = percentage * timeline.totalTimelineDuration;
     const targetMediaTime = timelineToMedia(targetTimelineTime);
-    
+
     videoRef.current.currentTime = targetMediaTime;
     playheadTimeRef.current = targetTimelineTime;
     setPlayheadTime(targetTimelineTime);
 
-    const targetClip = timeline.clips.find(
-      (clip) => targetMediaTime >= clip.start - 0.05 && targetMediaTime <= clip.end + 0.05
-    );
+    const targetClip = findClipByMediaTime(targetMediaTime);
     if (targetClip) {
       setActiveClipId(targetClip.id);
       setActiveClipState(targetClip);
@@ -384,6 +464,11 @@ export default function App() {
   const handleTimelineMouseDown = (e) => {
     isDraggingRef.current = true;
     handleTimelineScrub(e);
+  };
+
+  const handlePlayheadMouseDown = (e) => {
+    e.stopPropagation();
+    isDraggingRef.current = true;
   };
 
   useEffect(() => {
@@ -430,25 +515,42 @@ export default function App() {
   const analyzeVideo = async () => {
     if (!file || !duration) return;
     setAnalysisStatus("analyzing");
-    setChatMessages([]);
-    setManualEdits([]);
-    undoStackRef.current = [];
-    redoStackRef.current = [];
+
+    // 如果有会话 ID，不清空聊天记录（保留历史对话）
+    if (!sessionId) {
+      setChatMessages([]);
+      setManualEdits([]);
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+    }
+
     appendChatMessage({
       role: "user",
       time: new Date().toLocaleTimeString(),
       message: userRequest,
     });
-    
+
     try {
       const formData = new FormData();
-      formData.append("video", file);
-      formData.append("duration", String(duration));
-      formData.append("request", userRequest);
-      formData.append("pe", pe);
-      formData.append("isMock", isMock.toString());
-      formData.append("engine", engine);
-      if (prepareId) formData.append("prepareId", prepareId);
+
+      // 如果有会话 ID，只需要传递 sessionId，不需要重新上传视频
+      if (sessionId) {
+        formData.append("sessionId", sessionId);
+        formData.append("duration", String(duration));
+        formData.append("request", userRequest);
+        formData.append("pe", pe);
+        formData.append("engine", engine);
+        // 不上传视频文件
+      } else {
+        // 首次分析，需要上传视频
+        formData.append("video", file);
+        formData.append("duration", String(duration));
+        formData.append("request", userRequest);
+        formData.append("pe", pe);
+        formData.append("isMock", isMock.toString());
+        formData.append("engine", engine);
+        if (prepareId) formData.append("prepareId", prepareId);
+      }
 
       const response = await fetch(`${apiBase}/api/analyze`, {
         method: "POST",
@@ -488,6 +590,11 @@ export default function App() {
 
           } else if (payload.type === "result") {
             const data = payload;
+
+            // 保存会话 ID
+            if (data.sessionId) {
+              setSessionId(data.sessionId);
+            }
 
             setFeatures(prev => ({
               ...data.features,
@@ -563,16 +670,31 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (e) => {
+      const tag = e.target.tagName;
+      const inInput = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
       const isUndo = (e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z";
-      const isRedo = (e.metaKey || e.ctrlKey) && (e.shiftKey && e.key.toLowerCase() === "z");
-      if (isUndo) {
+      const isRedo = (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "z";
+      if (isUndo) { e.preventDefault(); handleUndo(); return; }
+      if (isRedo) { e.preventDefault(); handleRedo(); return; }
+      if (inInput) return;
+      const vid = videoRef.current;
+      if (!vid || !videoUrl) return;
+      if (e.key === " ") { e.preventDefault(); togglePlay(); }
+      if (e.key === "j") { e.preventDefault(); vid.pause(); setIsPlaying(false); vid.currentTime = Math.max(0, vid.currentTime - 10); }
+      if (e.key === "k") { e.preventDefault(); vid.pause(); setIsPlaying(false); }
+      if (e.key === "l") { e.preventDefault(); vid.currentTime = Math.min(duration, vid.currentTime + 10); vid.play(); setIsPlaying(true); }
+      if (e.key === "ArrowLeft") {
         e.preventDefault();
-        handleUndo();
+        const delta = e.metaKey || e.ctrlKey ? 30 : e.shiftKey ? 10 : 5;
+        vid.currentTime = Math.max(0, vid.currentTime - delta);
       }
-      if (isRedo) {
+      if (e.key === "ArrowRight") {
         e.preventDefault();
-        handleRedo();
+        const delta = e.metaKey || e.ctrlKey ? 30 : e.shiftKey ? 10 : 5;
+        vid.currentTime = Math.min(duration, vid.currentTime + delta);
       }
+      if (e.key === ",") { e.preventDefault(); vid.currentTime = Math.max(0, vid.currentTime - 1 / 30); }
+      if (e.key === ".") { e.preventDefault(); vid.currentTime = Math.min(duration, vid.currentTime + 1 / 30); }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -786,6 +908,74 @@ export default function App() {
     }));
   };
 
+  // ── 调色 / 滤镜 ──────────────────────────────────────────────────
+  const updateColorAdjust = (key, value) => setColorAdjust(prev => ({ ...prev, [key]: value }));
+  const resetColorAdjust = () => { setColorAdjust({ brightness: 0, contrast: 0, saturation: 0, hue: 0, sharpness: 0 }); setActiveFilter("none"); };
+  const applyPresetFilter = (name) => { setActiveFilter(name); };
+
+  // ── 时间线缩放 ────────────────────────────────────────────────────
+  const handleTimelineWheel = useCallback((e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      setTimelineScale(prev => Math.max(1, Math.min(30, prev * (e.deltaY > 0 ? 0.85 : 1.18))));
+    }
+  }, []);
+
+  // ── Trim 把手拖拽 ─────────────────────────────────────────────────
+  const handleTrimHandleStart = (e, clip, edge) => {
+    e.stopPropagation();
+    e.preventDefault();
+    trimDragRef.current = { active: true, clip, edge, startX: e.clientX, pendingTime: null };
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      const drag = trimDragRef.current;
+      if (!drag?.active || !timelineRef.current) return;
+      const contRect = timelineRef.current.getBoundingClientRect();
+      const totalPx = contRect.width * timelineScale;
+      const totalDur = timeline?.totalTimelineDuration || duration || 1;
+      const pxPerSec = totalPx / totalDur;
+      const deltaSec = (e.clientX - drag.startX) / pxPerSec;
+      const { clip, edge } = drag;
+      let newTime;
+      if (edge === "start") {
+        newTime = Math.max(0, Math.min(clip.end - 0.1, clip.start + deltaSec));
+      } else {
+        newTime = Math.max(clip.start + 0.1, Math.min(duration, clip.end + deltaSec));
+      }
+      trimDragRef.current.pendingTime = newTime;
+      // 强制重绘以预览
+      setPlayheadTime(t => t);
+    };
+    const onUp = () => {
+      const drag = trimDragRef.current;
+      if (!drag?.active) return;
+      trimDragRef.current = null;
+      const { clip, edge, pendingTime } = drag;
+      if (pendingTime === null) return;
+      if (edge === "start" && Math.abs(pendingTime - clip.start) > 0.05) {
+        applyManualEdits([...manualEdits, {
+          type: "delete",
+          start: Math.min(clip.start, pendingTime),
+          end: Math.max(clip.start, pendingTime),
+        }]);
+      } else if (edge === "end" && Math.abs(pendingTime - clip.end) > 0.05) {
+        applyManualEdits([...manualEdits, {
+          type: "delete",
+          start: Math.min(clip.end, pendingTime),
+          end: Math.max(clip.end, pendingTime),
+        }]);
+      }
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [timeline, duration, timelineScale, manualEdits]);
+
   const cropSquare = () => {
     const el = videoRef.current;
     const aspect = el?.videoWidth && el?.videoHeight ? el.videoWidth / el.videoHeight : 1;
@@ -835,11 +1025,15 @@ export default function App() {
   const handleExport = async () => {
     if (!timeline || !file) return;
     setIsExporting(true);
-    
+    setExportProgress({ status: "rendering", percent: 0, message: "准备中..." });
+
     try {
       const formData = new FormData();
       formData.append("video", file);
       formData.append("timeline", JSON.stringify(timeline));
+      formData.append("colorAdjust", JSON.stringify(colorAdjust));
+      formData.append("activeFilter", activeFilter);
+      formData.append("exportFormat", exportFormat);
 
       const response = await fetch(`${apiBase}/api/export`, {
         method: "POST",
@@ -848,30 +1042,57 @@ export default function App() {
 
       if (!response.ok) throw new Error("Export failed");
 
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${file.name.split('.')[0]}_edited.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      
-      appendChatMessage({
-        role: "assistant",
-        time: new Date().toLocaleTimeString(),
-        message: "✅ 视频导出成功！已利用 Mac 硬件加速完成渲染。",
-      });
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue;
+            let evt;
+            try { evt = JSON.parse(line.slice(6)); } catch (_) { continue; }
+            if (evt.type === "progress") {
+              setExportProgress({ status: "rendering", percent: evt.percent, message: evt.message || "" });
+            } else if (evt.type === "done") {
+              setExportProgress({ status: "done", percent: 100, message: "完成！" });
+              const fileResp = await fetch(`${apiBase}/api/export/file/${evt.fileId}`);
+              const blob = await fileResp.blob();
+              const url = window.URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url; a.download = `${file.name.split(".")[0]}_edited.mp4`;
+              document.body.appendChild(a); a.click();
+              window.URL.revokeObjectURL(url); document.body.removeChild(a);
+              appendChatMessage({ role: "assistant", time: new Date().toLocaleTimeString(), message: "✅ 视频导出成功！" });
+            } else if (evt.type === "error") {
+              throw new Error(evt.message || "渲染失败");
+            }
+          }
+        }
+      } else {
+        // fallback: direct blob download (legacy)
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `${file.name.split(".")[0]}_edited.mp4`;
+        document.body.appendChild(a); a.click();
+        window.URL.revokeObjectURL(url); document.body.removeChild(a);
+        setExportProgress({ status: "done", percent: 100, message: "" });
+        appendChatMessage({ role: "assistant", time: new Date().toLocaleTimeString(), message: "✅ 视频导出成功！" });
+      }
     } catch (error) {
       console.error("Export error:", error);
-      appendChatMessage({
-        role: "system",
-        time: new Date().toLocaleTimeString(),
-        message: "❌ 导出失败，请检查后端 FFmpeg 配置。",
-      });
+      setExportProgress({ status: "error", percent: 0, message: error.message });
+      appendChatMessage({ role: "system", time: new Date().toLocaleTimeString(), message: `❌ 导出失败：${error.message}` });
     } finally {
       setIsExporting(false);
+      setTimeout(() => setExportProgress({ status: "idle", percent: 0, message: "" }), 4000);
     }
   };
 
@@ -1027,6 +1248,7 @@ export default function App() {
                       return `inset(${top * 100}% ${right * 100}% ${bottom * 100}% ${left * 100}%)`;
                     })(),
                     transformOrigin: "center center",
+                    filter: computedFilter,
                   }}
                 />
                 {videoRef.current && videoRef.current.playbackRate !== 1 && (
@@ -1095,7 +1317,79 @@ export default function App() {
               {isPlaying ? "⏸" : "▶️"}
             </button>
             <span className="time-display">{formatTime(playheadTime)} / {formatTime(timeline?.totalTimelineDuration || duration)}</span>
+            <div className="preview-controls-right">
+              <select
+                className="format-select"
+                value={exportFormat}
+                onChange={(e) => setExportFormat(e.target.value)}
+                title="输出画幅"
+              >
+                <option value="original">原始比例</option>
+                <option value="16:9">16:9 横屏</option>
+                <option value="9:16">9:16 竖屏 (抖音)</option>
+                <option value="1:1">1:1 方形</option>
+                <option value="4:3">4:3 经典</option>
+              </select>
+              <button
+                className={`btn-panel-toggle ${activeRightPanel === "adjust" ? "active" : ""}`}
+                onClick={() => setActiveRightPanel(p => p === "adjust" ? null : "adjust")}
+                title="调色 / 滤镜"
+              >
+                🎨
+              </button>
+            </div>
           </div>
+
+          {exportProgress.status !== "idle" && (
+            <div className="export-progress-bar">
+              <div className="export-progress-fill" style={{ width: `${exportProgress.percent}%` }} />
+              <span className="export-progress-label">
+                {exportProgress.status === "done" ? "✅ 导出完成" :
+                 exportProgress.status === "error" ? "❌ 导出失败" :
+                 `渲染中 ${exportProgress.percent}%`}
+              </span>
+            </div>
+          )}
+
+          {activeRightPanel === "adjust" && (
+            <div className="adjust-panel">
+              <div className="adjust-panel-header">
+                <span>调色 / 滤镜</span>
+                <button className="btn-close-panel" onClick={() => setActiveRightPanel(null)}>✕</button>
+              </div>
+              <div className="adjust-section">
+                <div className="adjust-label">滤镜</div>
+                <div className="filter-grid">
+                  {[["none","无"],["vivid","鲜艳"],["cool","冷调"],["warm","暖调"],["vintage","复古"],["bw","黑白"],["cinematic","电影"]].map(([id,label]) => (
+                    <button key={id} className={`filter-chip ${activeFilter === id ? "active" : ""}`} onClick={() => applyPresetFilter(id)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="adjust-section">
+                <div className="adjust-label">亮度 <span>{colorAdjust.brightness > 0 ? "+" : ""}{Math.round(colorAdjust.brightness * 100)}</span></div>
+                <input type="range" min="-1" max="1" step="0.01" value={colorAdjust.brightness} onChange={e => updateColorAdjust("brightness", parseFloat(e.target.value))} />
+              </div>
+              <div className="adjust-section">
+                <div className="adjust-label">对比度 <span>{colorAdjust.contrast > 0 ? "+" : ""}{Math.round(colorAdjust.contrast * 100)}</span></div>
+                <input type="range" min="-1" max="1" step="0.01" value={colorAdjust.contrast} onChange={e => updateColorAdjust("contrast", parseFloat(e.target.value))} />
+              </div>
+              <div className="adjust-section">
+                <div className="adjust-label">饱和度 <span>{colorAdjust.saturation > 0 ? "+" : ""}{Math.round(colorAdjust.saturation * 100)}</span></div>
+                <input type="range" min="-1" max="1" step="0.01" value={colorAdjust.saturation} onChange={e => updateColorAdjust("saturation", parseFloat(e.target.value))} />
+              </div>
+              <div className="adjust-section">
+                <div className="adjust-label">色调 <span>{colorAdjust.hue > 0 ? "+" : ""}{colorAdjust.hue}°</span></div>
+                <input type="range" min="-180" max="180" step="1" value={colorAdjust.hue} onChange={e => updateColorAdjust("hue", parseInt(e.target.value))} />
+              </div>
+              <div className="adjust-section">
+                <div className="adjust-label">锐度 <span>{Math.round(colorAdjust.sharpness * 100)}</span></div>
+                <input type="range" min="0" max="1" step="0.01" value={colorAdjust.sharpness} onChange={e => updateColorAdjust("sharpness", parseFloat(e.target.value))} />
+              </div>
+              <button className="btn-reset-adjust" onClick={resetColorAdjust}>重置</button>
+            </div>
+          )}
         </section>
       </main>
 
@@ -1129,61 +1423,100 @@ export default function App() {
             <button className="tool-btn" onClick={resetTransform} data-tooltip="Reset" title="Reset">♻️</button>
           </div>
           <div className="toolbar-right">
-            <span>100%</span>
+            <button className="tool-btn zoom-btn" onClick={() => setTimelineScale(1)} title="适应" data-tooltip="适应">
+              ⊡
+            </button>
+            <button className="tool-btn zoom-btn" onClick={() => setTimelineScale(prev => Math.max(1, prev / 1.5))} title="缩小时间线" data-tooltip="缩小 (Ctrl+滚轮)">
+              −
+            </button>
+            <span className="zoom-level">{Math.round(timelineScale * 100)}%</span>
+            <button className="tool-btn zoom-btn" onClick={() => setTimelineScale(prev => Math.min(30, prev * 1.5))} title="放大时间线" data-tooltip="放大 (Ctrl+滚轮)">
+              +
+            </button>
           </div>
         </div>
 
-        <div 
-          className="timeline-container" 
+        <div
+          className="timeline-container"
           ref={timelineRef}
           onMouseDown={handleTimelineMouseDown}
+          onWheel={handleTimelineWheel}
         >
-          <div className="timeline-ruler">
-            {/* Simple ruler markers */}
-            {Array.from({ length: 10 }).map((_, i) => (
-              <span key={i} className="ruler-mark" style={{ left: `${i * 10}%` }}>
-                {formatTime(((timeline?.totalTimelineDuration || duration) / 10) * i)}
-              </span>
-            ))}
-            <div 
-              className="timeline-playhead" 
-              style={{ left: `${(playheadTime / (timeline?.totalTimelineDuration || duration || 1)) * 100}%` }}
-            />
+          <div className="timeline-ruler" style={{ width: `${timelineScale * 100}%` }}>
+            {(() => {
+              const totalDur = timeline?.totalTimelineDuration || duration || 1;
+              // 根据缩放级别决定间隔粒度
+              const approxPx = 800 * timelineScale;
+              const rawInterval = totalDur / (approxPx / 80);
+              const niceIntervals = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+              const interval = niceIntervals.find(n => n >= rawInterval) || niceIntervals[niceIntervals.length - 1];
+              const marks = [];
+              for (let t = 0; t <= totalDur + 0.001; t += interval) {
+                const pct = (Math.min(t, totalDur) / totalDur) * 100;
+                marks.push(
+                  <span key={t} className="ruler-mark" style={{ left: `${pct}%` }}>
+                    {formatTime(Math.min(t, totalDur))}
+                  </span>
+                );
+              }
+              return marks;
+            })()}
           </div>
 
-          <div className="timeline-tracks">
+          <div className="timeline-tracks" style={{ width: `${timelineScale * 100}%` }}>
+            <div
+              className="timeline-playhead-full"
+              style={{ left: `${(playheadTime / (timeline?.totalTimelineDuration || duration || 1)) * 100}%` }}
+              onMouseDown={handlePlayheadMouseDown}
+            >
+              <div className="playhead-handle" />
+            </div>
             <div className="track track-v1">
               <div className="track-id">V1</div>
               <div className="track-content">
                 {timeline && timeline.clips && timeline.clips.length > 0 ? (
-                  timeline.clips.map((clip, i) => (
-                    <div 
+                  timeline.clips.map((clip, i) => {
+                    // Trim preview: check if this clip is being dragged
+                    const drag = trimDragRef.current;
+                    let displayStart = clip.timelineStart;
+                    let displayDur = clip.displayDuration;
+                    if (drag?.active && drag.clip.id === clip.id && drag.pendingTime !== null) {
+                      if (drag.edge === "start") {
+                        const delta = (drag.pendingTime - drag.clip.start) / (clip.playbackRate || 1);
+                        displayStart = clip.timelineStart + delta;
+                        displayDur = clip.displayDuration - delta;
+                      } else {
+                        displayDur = (drag.pendingTime - clip.start) / (clip.playbackRate || 1);
+                      }
+                    }
+                    return (
+                    <div
                       key={clip.id}
-                      className={`video-clip-segment ${activeClipId === clip.id ? 'active' : ''}`}
-                      style={{ 
-                        left: `${(clip.timelineStart / timeline.totalTimelineDuration) * 100}%`,
-                        width: `${(clip.displayDuration / timeline.totalTimelineDuration) * 100}%`,
-                        opacity: clip.playbackRate !== 1 ? 0.8 : 1
+                      className={`video-clip-segment ${activeClipId === clip.id ? "active" : ""}`}
+                      style={{
+                        left: `${(displayStart / timeline.totalTimelineDuration) * 100}%`,
+                        width: `${(displayDur / timeline.totalTimelineDuration) * 100}%`,
+                        opacity: clip.playbackRate !== 1 ? 0.85 : 1,
                       }}
                       onClick={() => handleClipPlay(clip)}
                     >
+                      <div className="trim-handle trim-handle-left" onMouseDown={(e) => handleTrimHandleStart(e, clip, "start")} />
                       <div className="clip-thumb-overlay">
                         {thumbnails.length > 0 ? (
                           thumbnails
                             .filter(t => t.time >= clip.start - 0.5 && t.time <= clip.end + 0.5)
-                            .slice(0, 5) // 限制每个片段显示的缩略图数量，避免性能问题
-                            .map((t, idx) => (
-                              <img key={idx} src={t.image} alt="" />
-                            ))
+                            .slice(0, 5)
+                            .map((t, idx) => <img key={idx} src={t.image} alt="" />)
                         ) : null}
                       </div>
                       {clip.playbackRate && clip.playbackRate !== 1 && (
                         <div className="clip-speed-tag">⚡ {clip.playbackRate}x</div>
                       )}
-                      <div className="clip-label">{`Clip ${i+1}`}</div>
-                      {clip.edit && <div className="clip-edit-reason">{clip.edit.type}</div>}
+                      <div className="clip-label">{`Clip ${i + 1}`}</div>
+                      <div className="trim-handle trim-handle-right" onMouseDown={(e) => handleTrimHandleStart(e, clip, "end")} />
                     </div>
-                  ))
+                    );
+                  })
                 ) : file ? (
                   <div className="video-clip-bar">
                     <div className="thumb-strip">

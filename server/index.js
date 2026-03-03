@@ -13,6 +13,15 @@ import fs from "fs";
 import os from "os";
 import { createCanvas } from "canvas";
 import { searchAndDownloadBgm } from "./utils/fetchBgm.js";
+import {
+  createSession,
+  getSession,
+  updateSessionFeatures,
+  addConversation,
+  getConversationHistory,
+  deleteSession,
+  getSessionStats,
+} from "./sessionManager.js";
 
 /**
  * 用 canvas 生成一张透明背景的文字 PNG，返回文件路径
@@ -93,9 +102,14 @@ function probeVideoSize(inputPath) {
 }
 
 const app = express();
+const maxUploadMb = Number(process.env.MAX_UPLOAD_MB || 2048);
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, os.tmpdir()),
+    filename: (req, file, cb) =>
+      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2, 8)}-${file.originalname}`),
+  }),
+  limits: { fileSize: maxUploadMb * 1024 * 1024 },
 });
 
 app.use((req, res, next) => {
@@ -128,6 +142,27 @@ setInterval(() => {
     }
   }
 }, 5 * 60 * 1000);
+
+// ── 导出文件缓存（SSE 模式：FFmpeg 写完后存这里，前端来取）────────────────
+const exportFileMap = new Map(); // fileId → { path, filename, createdAt }
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of exportFileMap) {
+    if (now - entry.createdAt > 30 * 60 * 1000) {
+      try { if (fs.existsSync(entry.path)) fs.unlinkSync(entry.path); } catch (_) {}
+      exportFileMap.delete(id);
+    }
+  }
+}, 5 * 60 * 1000);
+
+app.get("/api/export/file/:fileId", (req, res) => {
+  const entry = exportFileMap.get(req.params.fileId);
+  if (!entry || !fs.existsSync(entry.path)) return res.status(404).json({ error: "not_found" });
+  res.download(entry.path, entry.filename, () => {
+    exportFileMap.delete(req.params.fileId);
+    try { fs.unlinkSync(entry.path); } catch (_) {}
+  });
+});
 
 const PROVIDERS = {
   gemini: analyzeVideoWithGemini,
@@ -182,6 +217,7 @@ app.post("/api/prepare", upload.single("video"), (req, res) => {
       size: videoFile.size,
       mimeType: videoFile.mimetype,
       buffer: videoFile.buffer,
+      path: videoFile.path,
     },
     apiKey
   ).catch((err) => {
@@ -199,7 +235,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
   const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
   const videoFile = req.file;
-  if (!videoFile) return res.status(400).json({ error: "missing_video" });
+  const sessionId = req.body.sessionId || null;
 
   const engine = resolveEngine(req);
   const provider = resolveProvider(engine);
@@ -231,6 +267,69 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     const pe = req.body.pe || "";
     const request = req.body.request || "";
     const prompt = req.body.prompt || "";
+
+    // ── 会话记忆：检查是否有已存在的会话 ──────────────────────────
+    const existingSession = sessionId ? getSession(sessionId) : null;
+
+    if (existingSession) {
+      // 有会话记忆，直接使用缓存的分析结果
+      console.log(`[analyze:${requestId}] 使用会话缓存 ${sessionId}`);
+      emitProgress("💾 使用已缓存的视频分析结果...");
+
+      // 记录用户请求到对话历史
+      addConversation(sessionId, { role: "user", content: request });
+
+      // 如果是纯文本编辑请求（不需要重新分析视频）
+      const skipVideoUpload = engine !== "mock" && engine !== "mock-agent" && !needsVideoAnalysis(request);
+
+      if (skipVideoUpload) {
+        // 纯文本编辑：基于已有的 features 进行增量编辑
+        emitProgress("✏️ 处理编辑指令...");
+
+        const result = await analyzeTextOnly({
+          engine,
+          duration: existingSession.videoInfo.duration,
+          request,
+          intent,
+          prompt,
+          pe,
+          onProgress: emitProgress,
+        });
+
+        // 更新会话的 features（增量合并）
+        if (result.features) {
+          const mergedFeatures = {
+            ...existingSession.analysisResult.features,
+            edits: [
+              ...(existingSession.analysisResult.features.edits || []),
+              ...(result.features.edits || []),
+            ],
+          };
+          updateSessionFeatures(sessionId, mergedFeatures);
+        }
+
+        // 记录 AI 响应
+        addConversation(sessionId, { role: "assistant", content: result.summary || "编辑完成" });
+
+        emitResult({
+          sessionId,
+          source: result.source,
+          features: result.features,
+          summary: result.summary,
+          rawResponse: result.rawResponse,
+          debug: { requestId, pe, request, prompt, engine, cached: true },
+          debugTimeline: result.debugTimeline || [],
+        });
+        return;
+      } else {
+        // 需要重新分析视频（例如"找出所有笑脸"），但可以复用已上传的视频
+        emitProgress("🔄 重新分析视频内容...");
+        // 这里暂时还是走完整流程，后续可以优化为复用已上传的视频 URI
+      }
+    }
+
+    // ── 新会话或需要完整分析 ──────────────────────────────────────
+    if (!videoFile) return res.status(400).json({ error: "missing_video" });
 
     const debugTimeline = [{
       time: new Date().toISOString(), role: "system", level: "info",
@@ -265,6 +364,8 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       size: videoFile.size,
       mimeType: videoFile.mimetype,
       buffer: videoFile.buffer,
+      path: videoFile.path,
+      duration,
     };
 
     const result = skipVideoUpload
@@ -284,7 +385,18 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       edits: result.features?.edits?.length || 0,
     }, null, 2));
 
+    // ── 创建新会话并缓存分析结果 ──────────────────────────────────
+    const newSessionId = createSession(
+      { name: videoFile.originalname, size: videoFile.size, duration, path: videoFile.path },
+      { features: result.features, source: result.source, summary: result.summary }
+    );
+
+    // 记录初始对话
+    addConversation(newSessionId, { role: "user", content: request });
+    addConversation(newSessionId, { role: "assistant", content: result.summary || "分析完成" });
+
     emitResult({
+      sessionId: newSessionId,
       source: result.source,
       features: result.features,
       summary: result.summary,
@@ -295,6 +407,10 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
   } catch (error) {
     console.error(`[analyze:${requestId}] error`, String(error));
     emitError("识别异常：" + String(error), { requestId });
+  } finally {
+    if (videoFile?.path && fs.existsSync(videoFile.path)) {
+      fs.unlinkSync(videoFile.path);
+    }
   }
 });
 
@@ -302,23 +418,36 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
   const requestId = `export-${Date.now()}`;
   let tempInputPath = null;
   let tempOutputPath = null;
-  let bgmPath = null; // BGM 临时文件，用完清理
+  let bgmPath = null;
+
+  // ── SSE 设置 ──
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+  const emitEvt = (obj) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); };
+  const emitProgress = (percent, message) => emitEvt({ type: "progress", percent, message });
+  const emitDone = (fileId) => { emitEvt({ type: "done", fileId }); res.end(); };
+  const emitExportError = (msg) => { emitEvt({ type: "error", message: msg }); res.end(); };
 
   try {
     const videoFile = req.file;
-    if (!videoFile) {
-      return res.status(400).json({ error: "missing_video" });
-    }
+    if (!videoFile) { emitExportError("missing_video"); return; }
 
     const timeline = JSON.parse(req.body.timeline || "{}");
-    if (!timeline.clips || timeline.clips.length === 0) {
-      return res.status(400).json({ error: "invalid_timeline" });
-    }
+    if (!timeline.clips || timeline.clips.length === 0) { emitExportError("invalid_timeline"); return; }
 
-    // 1. 准备临时文件
-    tempInputPath = path.join(os.tmpdir(), `${requestId}-input.mp4`);
+    const colorAdjust = JSON.parse(req.body.colorAdjust || "null") || {};
+    const activeFilter = req.body.activeFilter || "none";
+    const exportFormat = req.body.exportFormat || "original";
+
+    emitProgress(2, "准备文件...");
+
+    tempInputPath = videoFile.path || path.join(os.tmpdir(), `${requestId}-input.mp4`);
     tempOutputPath = path.join(os.tmpdir(), `${requestId}-output.mp4`);
-    fs.writeFileSync(tempInputPath, videoFile.buffer);
+    if (!videoFile.path) {
+      fs.writeFileSync(tempInputPath, videoFile.buffer);
+    }
 
     // 2. 构建 FFmpeg 滤镜链
     // 目标：为每个片段生成独立的 v/a 链，然后 concat，最后应用文字/淡入淡出
@@ -448,6 +577,56 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
       }
     }
 
+    // ── 调色校正（needsPost 之后统一应用，始终处理）──────────────────
+    const br = parseFloat(colorAdjust.brightness || 0);
+    const ct = parseFloat(colorAdjust.contrast || 0);
+    const sat = parseFloat(colorAdjust.saturation || 0);
+    const hue = parseFloat(colorAdjust.hue || 0);
+    const sharp = parseFloat(colorAdjust.sharpness || 0);
+    if (br !== 0 || ct !== 0 || sat !== 0) {
+      filterComplex += `;${finalVideoLabel}eq=brightness=${br}:contrast=${(1 + ct).toFixed(3)}:saturation=${(1 + sat).toFixed(3)}[vcol]`;
+      finalVideoLabel = "[vcol]";
+    }
+    if (hue !== 0) {
+      filterComplex += `;${finalVideoLabel}hue=h=${hue}[vhue]`;
+      finalVideoLabel = "[vhue]";
+    }
+    if (sharp > 0) {
+      filterComplex += `;${finalVideoLabel}unsharp=5:5:${(sharp * 1.5).toFixed(2)}:5:5:0[vsharp]`;
+      finalVideoLabel = "[vsharp]";
+    }
+    if (activeFilter === "bw") {
+      filterComplex += `;${finalVideoLabel}hue=s=0[vfilt]`;
+      finalVideoLabel = "[vfilt]";
+    } else if (activeFilter === "vintage") {
+      filterComplex += `;${finalVideoLabel}curves=preset=vintage[vfilt]`;
+      finalVideoLabel = "[vfilt]";
+    } else if (activeFilter === "cool") {
+      filterComplex += `;${finalVideoLabel}colorbalance=bs=0.08:bm=0.08:bh=0.08:rs=-0.06:rm=-0.06:rh=-0.06[vfilt]`;
+      finalVideoLabel = "[vfilt]";
+    } else if (activeFilter === "warm") {
+      filterComplex += `;${finalVideoLabel}colorbalance=rs=0.08:rm=0.08:rh=0.08:bs=-0.06:bm=-0.06:bh=-0.06[vfilt]`;
+      finalVideoLabel = "[vfilt]";
+    } else if (activeFilter === "vivid") {
+      filterComplex += `;${finalVideoLabel}eq=saturation=1.6:contrast=1.1[vfilt]`;
+      finalVideoLabel = "[vfilt]";
+    } else if (activeFilter === "cinematic") {
+      filterComplex += `;${finalVideoLabel}eq=saturation=0.85:contrast=1.15:brightness=-0.03[vfilt]`;
+      finalVideoLabel = "[vfilt]";
+    }
+
+    // ── 画幅/比例（黑边 padding）────────────────────────────────────
+    let padW = 0, padH = 0;
+    if (exportFormat === "16:9") { padW = 1920; padH = 1080; }
+    else if (exportFormat === "9:16") { padW = 1080; padH = 1920; }
+    else if (exportFormat === "1:1") { padW = 1080; padH = 1080; }
+    else if (exportFormat === "4:3") { padW = 1440; padH = 1080; }
+    if (padW > 0) {
+      console.log(`[export:${requestId}] aspect ratio: ${exportFormat} → ${padW}x${padH}`);
+      filterComplex += `;${finalVideoLabel}scale=${padW}:${padH}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${padW}:${padH}:(ow-iw)/2:(oh-ih)/2:color=black[vpad]`;
+      finalVideoLabel = "[vpad]";
+    }
+
     // 3. 执行 FFmpeg (使用 Mac 硬件加速编码器 h264_videotoolbox)
     // 文字 PNG 作为额外输入（-loop 1 + -t 限制时长，防止无限循环卡住）
     const totalDur = String(Math.ceil(timeline.totalTimelineDuration || 60) + 1);
@@ -460,49 +639,66 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
       extraInputs.push("-stream_loop", "-1", "-t", totalDur, "-i", bgmPath);
     }
 
+    const totalDurLimit = String(timeline.totalTimelineDuration || 60);
     const args = [
       "-y",
+      "-progress", "pipe:1",  // 进度输出到 stdout
       "-i", tempInputPath,
       ...extraInputs,
       "-filter_complex", filterComplex,
       "-map", finalVideoLabel,
       "-map", finalAudioLabel,
-      "-c:v", "h264_videotoolbox", // 关键：使用 Mac 硬件加速
-      "-b:v", "4000k",             // 码率
+      "-c:v", "h264_videotoolbox",
+      "-b:v", "4000k",
       "-c:a", "aac",
       "-b:a", "128k",
-      // 若有文字叠加或 BGM loop，需显式限制输出时长（防止无限循环卡住）
-      ...((textPngPaths.length > 0 || bgmPath) ? ["-t", String(timeline.totalTimelineDuration)] : []),
+      ...((textPngPaths.length > 0 || bgmPath || padW > 0) ? ["-t", totalDurLimit] : []),
       tempOutputPath
     ];
 
     console.log(`[export:${requestId}] FFmpeg command: ffmpeg ${args.join(" ")}`);
+    emitProgress(5, "开始渲染...");
 
-    const ffmpeg = spawn("ffmpeg", args);
+    const ffmpegProc = spawn("ffmpeg", args);
+    const totalSec = parseFloat(timeline.totalTimelineDuration) || 60;
 
-    ffmpeg.stderr.on("data", (data) => {
-      // ffmpeg 输出日志到 stderr
-      // console.log(`[export:ffmpeg:stderr] ${data}`);
+    // 解析 stdout 的 -progress 输出获取进度
+    let stdoutBuf = "";
+    ffmpegProc.stdout.on("data", (data) => {
+      stdoutBuf += data.toString();
+      const lines = stdoutBuf.split("\n");
+      stdoutBuf = lines.pop() || "";
+      for (const line of lines) {
+        const m = line.match(/^out_time_ms=(\d+)/);
+        if (m) {
+          const sec = parseInt(m[1]) / 1e6;
+          const pct = Math.max(5, Math.min(98, Math.round((sec / totalSec) * 100)));
+          emitProgress(pct, `渲染中 ${pct}%...`);
+        }
+      }
     });
 
-    ffmpeg.on("close", (code) => {
+    ffmpegProc.on("close", (code) => {
+      const extras = [...textPngPaths, ...(bgmPath ? [bgmPath] : [])];
       if (code === 0) {
         console.log(`[export:${requestId}] Render success`);
-        const allExtras = [...textPngPaths, ...(bgmPath ? [bgmPath] : [])];
-        res.download(tempOutputPath, `${videoFile.originalname.split('.')[0]}_edited.mp4`, () => {
-          cleanup(tempInputPath, tempOutputPath, allExtras);
-        });
+        const fileId = `${requestId}-dl`;
+        const filename = `${(videoFile.originalname || "output").split(".")[0]}_edited.mp4`;
+        exportFileMap.set(fileId, { path: tempOutputPath, filename, createdAt: Date.now() });
+        cleanup(tempInputPath, null, extras); // 不删 output，等前端来取
+        emitDone(fileId);
       } else {
-        console.error(`[export:${requestId}] Render failed with code ${code}`);
-        res.status(500).json({ error: "render_failed", code });
-        cleanup(tempInputPath, tempOutputPath, [...textPngPaths, ...(bgmPath ? [bgmPath] : [])]);
+        console.error(`[export:${requestId}] Render failed code=${code}`);
+        cleanup(tempInputPath, tempOutputPath, extras);
+        emitExportError(`渲染失败 (code=${code})`);
       }
     });
 
   } catch (error) {
     console.error(`[export:${requestId}] Error:`, error);
-    res.status(500).json({ error: "export_internal_error", message: error.message });
-    cleanup(tempInputPath, tempOutputPath, [...textPngPaths, ...(bgmPath ? [bgmPath] : [])]);
+    const extras = [...(bgmPath ? [bgmPath] : [])];
+    cleanup(tempInputPath, tempOutputPath, extras);
+    emitExportError(error.message || "export_internal_error");
   }
 });
 
@@ -515,6 +711,29 @@ const cleanup = (input, output, extras = []) => {
     console.error("Cleanup error:", e);
   }
 };
+
+// ── 会话管理 API ──────────────────────────────────────────────────
+app.get("/api/session/:sessionId", (req, res) => {
+  const session = getSession(req.params.sessionId);
+  if (!session) {
+    return res.status(404).json({ error: "session_not_found" });
+  }
+  res.json({
+    sessionId: session.sessionId,
+    videoInfo: session.videoInfo,
+    features: session.analysisResult.features,
+    conversationHistory: session.conversationHistory,
+  });
+});
+
+app.delete("/api/session/:sessionId", (req, res) => {
+  const deleted = deleteSession(req.params.sessionId);
+  res.json({ success: deleted });
+});
+
+app.get("/api/sessions", (req, res) => {
+  res.json(getSessionStats());
+});
 
 const port = Number(process.env.PORT || 8787);
 app.listen(port, () => {

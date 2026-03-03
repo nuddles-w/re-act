@@ -52,6 +52,7 @@ const tryExtractJson = (text) => {
 };
 
 export const parseFeatures = (text, durationLimit = 0) => {
+  if (text == null) return null;
   let payload = tryExtractJson(text);
   if (!payload) return null;
 
@@ -87,7 +88,7 @@ export const parseFeatures = (text, durationLimit = 0) => {
     })
     .filter(Boolean);
 
-  if (segments.length === 0 && !Array.isArray(payload.events)) return null;
+  if (segments.length === 0 && !Array.isArray(payload.events) && !Array.isArray(payload.steps)) return null;
 
   const maxEnd = segments.length > 0 ? Math.max(...segments.map((s) => s.end)) : 0;
   const duration = durationLimit > 0 ? durationLimit : maxEnd;

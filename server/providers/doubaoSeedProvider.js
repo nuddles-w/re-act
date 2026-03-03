@@ -1,6 +1,10 @@
+import fs from "fs";
+import path from "path";
+import os from "os";
 import { buildMockFeatures } from "../utils/mockFeatures.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
 import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
+import { compressVideoForUpload } from "../utils/compressVideo.js";
 
 const getAtempoChain = (rate) => {
   if (!Number.isFinite(rate) || rate <= 0) return "atempo=1.0";
@@ -26,7 +30,23 @@ const getAtempoChain = (rate) => {
   return filters.join(",");
 };
 
-const normalizeVideoDataUrl = (buffer, mimeType) => {
+const resolveCompressionProfile = (duration, size) => {
+  if (duration && duration >= 1800) {
+    return { maxWidth: 854, maxHeight: 480, fps: 0.5, audioBitrate: "32k" };
+  }
+  if (duration && duration >= 900) {
+    return { maxWidth: 960, maxHeight: 540, fps: 1, audioBitrate: "48k" };
+  }
+  if (size && size >= 800 * 1024 * 1024) {
+    return { maxWidth: 854, maxHeight: 480, fps: 0.5, audioBitrate: "32k" };
+  }
+  if (size && size >= 200 * 1024 * 1024) {
+    return { maxWidth: 960, maxHeight: 540, fps: 1, audioBitrate: "48k" };
+  }
+  return { maxWidth: 1280, maxHeight: 720, fps: 2, audioBitrate: "64k" };
+};
+
+const toDataUrl = (buffer, mimeType) => {
   const base64 = buffer.toString("base64");
   const safeMime = mimeType || "video/mp4";
   return `data:${safeMime};base64,${base64}`;
@@ -58,7 +78,7 @@ export async function analyzeVideoWithDoubaoSeed({
         baseUrl,
         fps,
         hasRequest: Boolean(request),
-        size: video.buffer.length,
+        size: video.size,
         pe,
       },
     },
@@ -78,9 +98,29 @@ export async function analyzeVideoWithDoubaoSeed({
     };
   }
 
+  let tempInputPath = null;
+  let tempCompressedPath = null;
+  let cleanupInput = false;
+
   try {
     onProgress?.("⬆️ 正在上传视频到 Doubao...");
-    const videoUrl = normalizeVideoDataUrl(video.buffer, video.mimeType);
+    let inputPath = video.path;
+    if (!inputPath || !fs.existsSync(inputPath)) {
+      tempInputPath = path.join(os.tmpdir(), `doubao-${Date.now()}-${video.name}`);
+      fs.writeFileSync(tempInputPath, video.buffer);
+      inputPath = tempInputPath;
+      cleanupInput = true;
+    }
+
+    let uploadPath = inputPath;
+    if ((video.size || 0) > 50 * 1024 * 1024 || duration > 600) {
+      tempCompressedPath = inputPath.replace(/\.[^.]+$/, "") + "-compressed.mp4";
+      const profile = resolveCompressionProfile(duration, video.size || 0);
+      await compressVideoForUpload(inputPath, tempCompressedPath, profile);
+      uploadPath = tempCompressedPath;
+    }
+
+    const videoUrl = toDataUrl(fs.readFileSync(uploadPath), video.mimeType);
     const userText = [
       pe ? `PE: ${pe}` : null,
       intent ? `Intent: ${JSON.stringify(intent)}` : null,
@@ -149,6 +189,8 @@ export async function analyzeVideoWithDoubaoSeed({
       rawResponse: String(error),
       debugTimeline,
     };
+  } finally {
+    if (cleanupInput && tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
+    if (tempCompressedPath && fs.existsSync(tempCompressedPath)) fs.unlinkSync(tempCompressedPath);
   }
 }
-

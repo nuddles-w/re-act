@@ -10,22 +10,25 @@ import fs from "fs";
  * @param {string} outputPath
  * @returns {Promise<{ inputSize: number, outputSize: number, durationMs: number }>}
  */
-export function compressVideoForUpload(inputPath, outputPath) {
+export function compressVideoForUpload(inputPath, outputPath, options = {}) {
   const t0 = Date.now();
   const inputSize = fs.statSync(inputPath).size;
+  const maxWidth = options.maxWidth || 1280;
+  const maxHeight = options.maxHeight || 720;
+  const fps = options.fps || 2;
+  const audioBitrate = options.audioBitrate || "64k";
 
   return new Promise((resolve, reject) => {
     const args = [
       "-y",
       "-i", inputPath,
-      // 按比例缩小到 720p 以内，不放大小视频
-      "-vf", "scale=1280:720:force_original_aspect_ratio=decrease",
-      "-r", "2",               // 2fps，AI 理解足够
+      "-vf", `scale=${maxWidth}:${maxHeight}:force_original_aspect_ratio=decrease`,
+      "-r", String(fps),
       "-c:v", "h264",
-      "-preset", "ultrafast",  // 最快压缩速度
-      "-crf", "28",            // 允许质量损失，换取文件更小
+      "-preset", "ultrafast",
+      "-crf", "28",
       "-c:a", "aac",
-      "-b:a", "64k",
+      "-b:a", audioBitrate,
       "-movflags", "+faststart",
       outputPath,
     ];

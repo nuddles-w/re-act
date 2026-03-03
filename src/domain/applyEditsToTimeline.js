@@ -10,7 +10,18 @@ const mediaToTimelineTime = (mediaTime, clips) => {
 
 export const applyEditsToTimeline = (timeline, edits, totalDuration = 0) => {
   if (!timeline) return timeline;
-  if (!edits || edits.length === 0) return { ...timeline, textEdits: [], fadeEdits: [] };
+
+  // Always compute timeline positions even with no structural edits
+  if (!edits || edits.length === 0) {
+    let t = 0;
+    const clips = (timeline.clips || []).map((c) => {
+      const dur = c.duration ?? (c.end - c.start);
+      const clp = { ...c, playbackRate: 1, displayDuration: dur, timelineStart: t };
+      t += dur;
+      return clp;
+    });
+    return { ...timeline, clips, totalTimelineDuration: t, textEdits: [], fadeEdits: [], bgmEdits: [] };
+  }
 
   let currentClips =
     timeline.clips && timeline.clips.length > 0

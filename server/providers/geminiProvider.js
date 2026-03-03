@@ -8,29 +8,52 @@ import { parseFeatures } from "../utils/parseFeatures.js";
 import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
 import { compressVideoForUpload } from "../utils/compressVideo.js";
 
+const resolveCompressionProfile = (duration, size) => {
+  if (duration && duration >= 1800) {
+    return { maxWidth: 854, maxHeight: 480, fps: 0.5, audioBitrate: "32k" };
+  }
+  if (duration && duration >= 900) {
+    return { maxWidth: 960, maxHeight: 540, fps: 1, audioBitrate: "48k" };
+  }
+  if (size && size >= 800 * 1024 * 1024) {
+    return { maxWidth: 854, maxHeight: 480, fps: 0.5, audioBitrate: "32k" };
+  }
+  if (size && size >= 200 * 1024 * 1024) {
+    return { maxWidth: 960, maxHeight: 540, fps: 1, audioBitrate: "48k" };
+  }
+  return { maxWidth: 1280, maxHeight: 720, fps: 2, audioBitrate: "64k" };
+};
+
 /**
  * Phase 1：压缩 + 上传 + 轮询 ACTIVE
  * 可在用户写 prompt 时提前调用，把等待时间移出关键路径。
  * @returns {{ fileUri, mimeType, fileMetadata, fileManager }}
  */
-export async function prepareGeminiUpload(video, apiKey, onProgress = null) {
+export async function prepareGeminiUpload(video, apiKey, onProgress = null, compressionProfile = null) {
   const t0 = Date.now();
   const fileManager = new GoogleAIFileManager(apiKey);
 
   let tempInputPath = null;
   let tempCompressedPath = null;
+  let cleanupInput = false;
 
   try {
-    // 1. 写原始文件
-    tempInputPath = path.join(os.tmpdir(), `gemini-prep-${Date.now()}-${video.name}`);
-    fs.writeFileSync(tempInputPath, video.buffer);
+    if (video.path && fs.existsSync(video.path)) {
+      tempInputPath = video.path;
+      cleanupInput = true;
+    } else {
+      tempInputPath = path.join(os.tmpdir(), `gemini-prep-${Date.now()}-${video.name}`);
+      fs.writeFileSync(tempInputPath, video.buffer);
+      cleanupInput = true;
+    }
 
-    // 2. 压缩
     onProgress?.("📦 正在压缩视频...");
     tempCompressedPath = tempInputPath.replace(/\.[^.]+$/, "") + "-compressed.mp4";
     let uploadPath = tempInputPath;
     try {
-      const compressResult = await compressVideoForUpload(tempInputPath, tempCompressedPath);
+      const profile =
+        compressionProfile || resolveCompressionProfile(video.duration || 0, video.size || 0);
+      const compressResult = await compressVideoForUpload(tempInputPath, tempCompressedPath, profile);
       const ratio = ((1 - compressResult.outputSize / compressResult.inputSize) * 100).toFixed(0);
       console.log(
         `[gemini:prepare] compress: ${compressResult.durationMs}ms  ` +
@@ -44,7 +67,6 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null) {
       onProgress?.("⬆️ 正在上传视频到 Gemini...");
     }
 
-    // 3. 上传
     const t1 = Date.now();
     const uploadResponse = await fileManager.uploadFile(uploadPath, {
       mimeType: "video/mp4",
@@ -54,7 +76,6 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null) {
     console.log(`[gemini:prepare] upload: ${Date.now() - t1}ms`);
     onProgress?.("⬆️ 上传完成，等待 Gemini 处理视频...");
 
-    // 4. 轮询 ACTIVE（3s 间隔，比原先 5s 更快感知）
     const t2 = Date.now();
     let file = await fileManager.getFile(fileMetadata.name);
     let rounds = 0;
@@ -76,7 +97,7 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null) {
 
     return { fileUri: file.uri, mimeType: file.mimeType, fileMetadata, fileManager };
   } finally {
-    if (tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
+    if (cleanupInput && tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
     if (tempCompressedPath && fs.existsSync(tempCompressedPath)) fs.unlinkSync(tempCompressedPath);
   }
 }
@@ -124,7 +145,8 @@ export async function analyzeVideoWithGemini({
     // 如果没有预上传文件，走完整上传流程（兜底）
     if (!activeFile) {
       debugTimeline.push({ time: new Date().toISOString(), role: "system", level: "info", message: "开始上传视频" });
-      activeFile = await prepareGeminiUpload(video, apiKey, onProgress);
+      const profile = resolveCompressionProfile(duration, video?.size || 0);
+      activeFile = await prepareGeminiUpload(video, apiKey, onProgress, profile);
     } else {
       onProgress?.("⚡ 视频已预处理完毕，直接开始推理...");
     }
