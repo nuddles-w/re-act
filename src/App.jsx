@@ -48,6 +48,9 @@ export default function App() {
   const activeClipRef = useRef(null);
   const fadeOpacityRef = useRef(1);
   const isDraggingRef = useRef(false);
+  const scrubMovedRef = useRef(false);   // 区分 drag vs click
+  const scrubStartXRef = useRef(0);      // mousedown 起始 X
+  const handleTimelineScrubRef = useRef(null);
   const timelineRef = useRef(null);
   const previewContainerRef = useRef(null);
   const [videoArea, setVideoArea] = useState(null); // 视频在预览区的实际渲染位置和尺寸
@@ -390,10 +393,13 @@ export default function App() {
       playheadRafRef.current = requestAnimationFrame(() => {
         playheadRafRef.current = null;
         const latestTime = latestTimeRef.current;
-        const nextPlayhead = mediaToTimeline(latestTime);
-        // 移除阈值判断，每帧都更新以保证流畅
-        playheadTimeRef.current = nextPlayhead;
-        setPlayheadTime(nextPlayhead);
+
+        // 拖拽期间由 handleTimelineScrub 独占 playhead，避免异步 timeupdate 覆盖
+        if (!isDraggingRef.current) {
+          const nextPlayhead = mediaToTimeline(latestTime);
+          playheadTimeRef.current = nextPlayhead;
+          setPlayheadTime(nextPlayhead);
+        }
 
         const fadeEdit = combinedEdits.find(
           (e) => e.type === "fade" && latestTime >= e.start && latestTime <= e.end
@@ -431,15 +437,17 @@ export default function App() {
   };
 
   const handleTimelineScrub = (e) => {
-    if (!timeline || !timeline.totalTimelineDuration || !timelineRef.current || !videoRef.current) return;
+    if (!timelineRef.current || !videoRef.current) return;
+    const totalDuration = timeline?.totalTimelineDuration || duration;
+    if (!totalDuration) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const scrollLeft = timelineRef.current.scrollLeft;
     const x = e.clientX - rect.left + scrollLeft;
     const totalWidth = rect.width * timelineScale;
     const percentage = Math.max(0, Math.min(1, x / totalWidth));
 
-    const targetTimelineTime = percentage * timeline.totalTimelineDuration;
-    const targetMediaTime = timelineToMedia(targetTimelineTime);
+    const targetTimelineTime = percentage * totalDuration;
+    const targetMediaTime = timeline?.totalTimelineDuration ? timelineToMedia(targetTimelineTime) : targetTimelineTime;
 
     videoRef.current.currentTime = targetMediaTime;
     playheadTimeRef.current = targetTimelineTime;
@@ -461,24 +469,36 @@ export default function App() {
     }
   };
 
+  // 始终保持 ref 指向最新的 scrub 函数，解决 useEffect stale closure
+  handleTimelineScrubRef.current = handleTimelineScrub;
+
   const handleTimelineMouseDown = (e) => {
     isDraggingRef.current = true;
+    scrubMovedRef.current = false;
+    scrubStartXRef.current = e.clientX;
     handleTimelineScrub(e);
   };
 
   const handlePlayheadMouseDown = (e) => {
     e.stopPropagation();
     isDraggingRef.current = true;
+    scrubMovedRef.current = false;
+    scrubStartXRef.current = e.clientX;
   };
 
   useEffect(() => {
     const handleGlobalMouseMove = (e) => {
       if (isDraggingRef.current) {
-        handleTimelineScrub(e);
+        if (Math.abs(e.clientX - scrubStartXRef.current) > 4) {
+          scrubMovedRef.current = true;
+        }
+        handleTimelineScrubRef.current?.(e);
       }
     };
     const handleGlobalMouseUp = () => {
       isDraggingRef.current = false;
+      // scrubMovedRef 在下一帧重置，确保同帧的 onClick 能读到正确值
+      requestAnimationFrame(() => { scrubMovedRef.current = false; });
     };
 
     window.addEventListener("mousemove", handleGlobalMouseMove);
@@ -487,7 +507,7 @@ export default function App() {
       window.removeEventListener("mousemove", handleGlobalMouseMove);
       window.removeEventListener("mouseup", handleGlobalMouseUp);
     };
-  }, [duration]);
+  }, []); // 空依赖：通过 ref 拿到最新函数，无需重新注册
 
   const handleEventPreview = (event) => {
     if (!videoRef.current) return;
@@ -1467,9 +1487,8 @@ export default function App() {
             <div
               className="timeline-playhead-full"
               style={{ left: `${(playheadTime / (timeline?.totalTimelineDuration || duration || 1)) * 100}%` }}
-              onMouseDown={handlePlayheadMouseDown}
             >
-              <div className="playhead-handle" />
+              <div className="playhead-handle" onMouseDown={handlePlayheadMouseDown} />
             </div>
             <div className="track track-v1">
               <div className="track-id">V1</div>
@@ -1498,7 +1517,7 @@ export default function App() {
                         width: `${(displayDur / timeline.totalTimelineDuration) * 100}%`,
                         opacity: clip.playbackRate !== 1 ? 0.85 : 1,
                       }}
-                      onClick={() => handleClipPlay(clip)}
+                      onClick={() => { if (!scrubMovedRef.current) handleClipPlay(clip); }}
                     >
                       <div className="trim-handle trim-handle-left" onMouseDown={(e) => handleTrimHandleStart(e, clip, "start")} />
                       <div className="clip-thumb-overlay">
