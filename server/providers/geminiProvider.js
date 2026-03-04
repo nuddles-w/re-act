@@ -7,6 +7,7 @@ import { buildMockFeatures } from "../utils/mockFeatures.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
 import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
 import { compressVideoForUpload } from "../utils/compressVideo.js";
+import { computeVideoHash, getCachedFile, setCachedFile } from "../videoCache.js";
 
 const resolveCompressionProfile = (duration, size) => {
   if (duration && duration >= 1800) {
@@ -38,6 +39,7 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null, comp
   let cleanupInput = false;
 
   try {
+    // 准备输入文件路径
     if (video.path && fs.existsSync(video.path)) {
       tempInputPath = video.path;
       cleanupInput = true;
@@ -45,6 +47,14 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null, comp
       tempInputPath = path.join(os.tmpdir(), `gemini-prep-${Date.now()}-${video.name}`);
       fs.writeFileSync(tempInputPath, video.buffer);
       cleanupInput = true;
+    }
+
+    // 计算视频 hash，检查缓存
+    const videoHash = computeVideoHash(tempInputPath);
+    const cached = getCachedFile(videoHash);
+    if (cached) {
+      onProgress?.("✅ 使用缓存的视频文件，无需重新上传");
+      return cached;
     }
 
     onProgress?.("📦 正在压缩视频...");
@@ -95,7 +105,12 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null, comp
 
     console.log(`[gemini:prepare] ✅ total: ${Date.now() - t0}ms  ← 已在用户写 prompt 时完成`);
 
-    return { fileUri: file.uri, mimeType: file.mimeType, fileMetadata, fileManager };
+    const result = { fileUri: file.uri, mimeType: file.mimeType, fileMetadata, fileManager };
+
+    // 缓存文件信息
+    setCachedFile(videoHash, result);
+
+    return result;
   } finally {
     if (cleanupInput && tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
     if (tempCompressedPath && fs.existsSync(tempCompressedPath)) fs.unlinkSync(tempCompressedPath);
@@ -198,9 +213,10 @@ export async function analyzeVideoWithGemini({
     debugTimeline.push({ time: new Date().toISOString(), role: "system", level: "error", message: "Agent 推理失败", data: { error: String(error) } });
     return { features: buildMockFeatures(video, duration, "", intent, request), debugTimeline };
   } finally {
-    // 异步清理远端文件，不阻塞响应
-    if (activeFile?.fileMetadata && activeFile?.fileManager) {
-      activeFile.fileManager.deleteFile(activeFile.fileMetadata.name).catch(() => {});
-    }
+    // 不再删除远端文件，保留用于缓存复用
+    // Gemini 文件会在 48 小时后自动过期
+    // if (activeFile?.fileMetadata && activeFile?.fileManager) {
+    //   activeFile.fileManager.deleteFile(activeFile.fileMetadata.name).catch(() => {});
+    // }
   }
 }

@@ -22,6 +22,7 @@ import {
   deleteSession,
   getSessionStats,
 } from "./sessionManager.js";
+import { cleanExpiredCache, getCacheStats } from "./videoCache.js";
 
 /**
  * 用 canvas 生成一张透明背景的文字 PNG，返回文件路径
@@ -735,7 +736,16 @@ app.get("/api/sessions", (req, res) => {
   res.json(getSessionStats());
 });
 
+app.get("/api/cache/stats", (req, res) => {
+  res.json(getCacheStats());
+});
+
 const port = Number(process.env.PORT || 8787);
 app.listen(port, () => {
   console.log(`video-ai server listening on ${port}`);
+
+  // 每小时清理一次过期缓存
+  setInterval(() => {
+    cleanExpiredCache();
+  }, 3600 * 1000);
 });
