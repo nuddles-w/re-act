@@ -185,7 +185,18 @@ export const parseFeatures = (text, durationLimit = 0) => {
     });
   }
 
-  const normalizedEdits = edits
+  // 去重：相同 type + start + end 的 edit 只保留一个
+  const uniqueEdits = [];
+  const seen = new Set();
+  edits.forEach(edit => {
+    const key = `${edit.type}-${edit.start}-${edit.end}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueEdits.push(edit);
+    }
+  });
+
+  const normalizedEdits = uniqueEdits
     .map((edit) => {
       if (!edit || typeof edit !== "object") return null;
       const rawType = String(edit.type || "").toLowerCase();

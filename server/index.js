@@ -329,7 +329,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     }
 
     // ── 新会话或需要完整分析 ──────────────────────────────────────
-    if (!videoFile) return res.status(400).json({ error: "missing_video" });
+    if (!videoFile) { emitError("missing_video: 需要重新上传视频文件以重新分析"); return; }
 
     const debugTimeline = [{
       time: new Date().toISOString(), role: "system", level: "info",

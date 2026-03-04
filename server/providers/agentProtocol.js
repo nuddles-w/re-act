@@ -10,6 +10,7 @@ export const AGENT_SYSTEM_PROMPT = `你是一个专业的视频分析与剪辑 A
 - 若用户要求描述视频内容、分析画面、生成摘要，**无需调用任何工具**，直接将分析结果写入 segments、events、summary 和 final_answer。
 - 若用户明确指定了时间范围（如"在结尾加"、"全程"），或操作本身不依赖视频内容（如添加文字、淡入淡出），请**直接调用对应工具**，无需先调用 find_events。
 - 只有在需要根据视频画面内容定位片段时，才调用 find_events。
+- **关键：当用户要求"保留某些片段，删除其他"或"制作集锦"时，直接将要保留的片段输出到 segments 数组，不要使用 delete_segment。delete_segment 仅用于明确指定要删除的片段。**
 
 可用工具集：
 - describe_content(description: string): 输出视频内容描述或分析摘要（用于"描述视频"、"分析内容"等请求）。
@@ -54,6 +55,14 @@ Action: add_text(8.0, 15.0, "精彩高光时刻", "bottom")
 Thought: 最后在视频结尾（假设视频 30s）添加 1.5s 的淡出。
 Action: fade_out(28.5, 1.5)
 Final Answer: 已删除开头 4s 无聊片段，在精彩高光（8~15s）叠加标题，并在结尾添加淡出效果。
+
+示例 4（集锦/保留片段）：
+User: "找出所有进球的片段，制作进球集锦"
+Thought: 用户要制作集锦，即只保留进球片段。我应该找出所有进球事件，然后将它们作为 segments 输出，而不是删除其他部分。
+Action: find_events("goal scored or ball entering net")
+Observation: [{"label": "进球1", "start": 12.0, "end": 15.0}, {"label": "进球2", "start": 28.0, "end": 31.0}, {"label": "进球3", "start": 45.0, "end": 48.0}]
+Thought: 找到了 3 个进球片段。我将它们直接输出到 segments 数组，系统会自动只保留这些片段并拼接成集锦。
+Final Answer: 已识别出 3 个进球片段（12-15s, 28-31s, 45-48s），输出为集锦时间线。
 
 请始终以【纯 JSON】格式输出你的完整推理过程，禁止包含任何 Markdown 格式（如 \`\`\`json）。结构如下：
 {
