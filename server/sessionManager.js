@@ -27,6 +27,7 @@ export function createSession(videoInfo, analysisResult) {
     videoInfo,
     analysisResult,
     conversationHistory: [],
+    conversationSummary: null, // 压缩后的早期对话摘要
     createdAt: Date.now(),
     lastAccessedAt: Date.now(),
   });
@@ -107,6 +108,33 @@ export function getConversationHistory(sessionId, limit = 0) {
 
   const history = session.conversationHistory;
   return limit > 0 ? history.slice(-limit) : history;
+}
+
+/**
+ * 获取会话摘要
+ * @param {string} sessionId
+ * @returns {string|null}
+ */
+export function getConversationSummary(sessionId) {
+  const session = getSession(sessionId);
+  return session?.conversationSummary || null;
+}
+
+/**
+ * 压缩完成后，更新会话：替换历史为保留部分，存储摘要
+ * @param {string} sessionId
+ * @param {string} summary - 压缩生成的摘要
+ * @param {Array} keptHistory - 保留的近期对话
+ */
+export function applyCompression(sessionId, summary, keptHistory) {
+  const session = getSession(sessionId);
+  if (!session) return false;
+
+  session.conversationSummary = summary;
+  session.conversationHistory = keptHistory;
+
+  console.log(`[session:${sessionId}] compressed: summary=${summary.length} chars, kept=${keptHistory.length} messages`);
+  return true;
 }
 
 /**

@@ -5,6 +5,7 @@ import { buildMockFeatures } from "../utils/mockFeatures.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
 import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
 import { compressVideoForUpload } from "../utils/compressVideo.js";
+import { formatHistoryForMessages } from "../utils/buildEditContext.js";
 
 const getAtempoChain = (rate) => {
   if (!Number.isFinite(rate) || rate <= 0) return "atempo=1.0";
@@ -59,6 +60,9 @@ export async function analyzeVideoWithDoubaoSeed({
   intent,
   prompt,
   pe,
+  conversationHistory,
+  conversationSummary,
+  editContext,
   onProgress = null,
 }) {
   const apiKey =
@@ -125,6 +129,7 @@ export async function analyzeVideoWithDoubaoSeed({
       pe ? `PE: ${pe}` : null,
       intent ? `Intent: ${JSON.stringify(intent)}` : null,
       prompt ? `Prompt: ${prompt}` : null,
+      editContext || null,
       request ? `User request: ${request}` : null,
       duration ? `Video duration: ${duration}s` : null,
       "",
@@ -133,10 +138,13 @@ export async function analyzeVideoWithDoubaoSeed({
       .filter(Boolean)
       .join("\n");
 
+    // 构建 multi-turn messages：system + 历史对话 + 当前请求（含视频）
+    const historyMessages = formatHistoryForMessages(conversationHistory, 6, conversationSummary);
     const body = {
       model,
       messages: [
         { role: "system", content: AGENT_SYSTEM_PROMPT },
+        ...historyMessages,
         {
           role: "user",
           content: [

@@ -8,6 +8,7 @@ import { parseFeatures } from "../utils/parseFeatures.js";
 import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
 import { compressVideoForUpload } from "../utils/compressVideo.js";
 import { computeVideoHash, getCachedFile, setCachedFile } from "../videoCache.js";
+import { formatHistoryForPrompt } from "../utils/buildEditContext.js";
 
 const resolveCompressionProfile = (duration, size) => {
   if (duration && duration >= 1800) {
@@ -129,6 +130,9 @@ export async function analyzeVideoWithGemini({
   prompt,
   pe,
   preloadedFile, // { fileUri, mimeType, fileMetadata, fileManager } from prepareGeminiUpload
+  conversationHistory,
+  conversationSummary,
+  editContext,
   onProgress = null,
 }) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -176,11 +180,16 @@ export async function analyzeVideoWithGemini({
       generationConfig: { responseMimeType: "application/json" },
     });
 
+    const historyText = formatHistoryForPrompt(conversationHistory, 6, conversationSummary);
+
     const finalPrompt =
+      (editContext ? `${editContext}\n\n` : "") +
+      (historyText ? `${historyText}\n` : "") +
       `用户指令: "${request || "分析并剪辑视频"}"\n` +
       `视频时长: ${duration}s\n` +
       `文件名: ${video?.name || "video"}\n\n` +
-      `请基于视频内容和用户指令，执行 Re-Act 推理并给出剪辑方案。`;
+      `请基于视频内容和用户指令，执行 Re-Act 推理并给出剪辑方案。` +
+      (historyText ? "\n请结合对话历史和当前编辑状态理解用户意图，支持指代（如'刚才那个''再快一点'）。" : "");
 
     const result = await model.generateContent([
       { fileData: { mimeType: activeFile.mimeType, fileUri: activeFile.fileUri } },

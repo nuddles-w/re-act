@@ -19,10 +19,14 @@ import {
   updateSessionFeatures,
   addConversation,
   getConversationHistory,
+  getConversationSummary,
+  applyCompression,
   deleteSession,
   getSessionStats,
 } from "./sessionManager.js";
 import { cleanExpiredCache, getCacheStats } from "./videoCache.js";
+import { buildEditContext } from "./utils/buildEditContext.js";
+import { needsCompression, compressConversation } from "./utils/conversationSummarizer.js";
 
 /**
  * 用 canvas 生成一张透明背景的文字 PNG，返回文件路径
@@ -287,6 +291,10 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         // 纯文本编辑：基于已有的 features 进行增量编辑
         emitProgress("✏️ 处理编辑指令...");
 
+        const conversationHistory = getConversationHistory(sessionId);
+        const conversationSummary = getConversationSummary(sessionId);
+        const editContext = buildEditContext(existingSession);
+
         const result = await analyzeTextOnly({
           engine,
           duration: existingSession.videoInfo.duration,
@@ -294,6 +302,9 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
           intent,
           prompt,
           pe,
+          conversationHistory,
+          conversationSummary,
+          editContext,
           onProgress: emitProgress,
         });
 
@@ -311,6 +322,14 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
 
         // 记录 AI 响应
         addConversation(sessionId, { role: "assistant", content: result.summary || "编辑完成" });
+
+        // 检查是否需要压缩对话历史
+        const updatedHistory = getConversationHistory(sessionId);
+        if (needsCompression(updatedHistory)) {
+          compressConversation(updatedHistory, getConversationSummary(sessionId))
+            .then(({ summary, keptHistory }) => applyCompression(sessionId, summary, keptHistory))
+            .catch(err => console.warn(`[compress] failed for ${sessionId}: ${err.message}`));
+        }
 
         emitResult({
           sessionId,
@@ -369,9 +388,14 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       duration,
     };
 
+    // 如果是已有会话的重新分析，取出历史和编辑状态
+    const conversationHistory = existingSession ? getConversationHistory(sessionId) : [];
+    const conversationSummary = existingSession ? getConversationSummary(sessionId) : null;
+    const editContext = existingSession ? buildEditContext(existingSession) : "";
+
     const result = skipVideoUpload
-      ? await analyzeTextOnly({ engine, duration, request, intent, prompt, pe, onProgress: emitProgress })
-      : await provider({ video, duration, intent, prompt, request, pe, preloadedFile, onProgress: emitProgress });
+      ? await analyzeTextOnly({ engine, duration, request, intent, prompt, pe, conversationHistory, conversationSummary, editContext, onProgress: emitProgress })
+      : await provider({ video, duration, intent, prompt, request, pe, preloadedFile, conversationHistory, conversationSummary, editContext, onProgress: emitProgress });
 
     if (Array.isArray(result.debugTimeline)) debugTimeline.push(...result.debugTimeline);
     debugTimeline.push({

@@ -5,9 +5,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { parseFeatures } from "../utils/parseFeatures.js";
 import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
+import { formatHistoryForPrompt, formatHistoryForMessages } from "../utils/buildEditContext.js";
 
 // ── Gemini 文本模式 ──────────────────────────────────────────────────
-async function textOnlyWithGemini({ duration, request, intent, prompt, pe }) {
+async function textOnlyWithGemini({ duration, request, intent, prompt, pe, conversationHistory, conversationSummary, editContext }) {
   const apiKey = process.env.GEMINI_API_KEY;
   const modelName = "gemini-2.5-flash";
 
@@ -18,14 +19,19 @@ async function textOnlyWithGemini({ duration, request, intent, prompt, pe }) {
     generationConfig: { responseMimeType: "application/json" },
   });
 
+  const historyText = formatHistoryForPrompt(conversationHistory, 6, conversationSummary);
+
   const finalPrompt = [
     pe ? `PE: ${pe}` : null,
     intent ? `Intent: ${JSON.stringify(intent)}` : null,
     prompt ? `Prompt: ${prompt}` : null,
+    editContext || null,
+    historyText || null,
     `用户指令: "${request || "按用户要求编辑视频"}"`,
     `视频时长: ${duration}s`,
     "",
     "注意：本次无需分析视频内容，请直接根据用户指令和视频时长生成剪辑方案。",
+    historyText ? "请结合对话历史和当前编辑状态理解用户意图，支持指代（如'刚才那个''再快一点'）。" : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -49,7 +55,7 @@ async function textOnlyWithGemini({ duration, request, intent, prompt, pe }) {
 }
 
 // ── Doubao 文本模式 ──────────────────────────────────────────────────
-async function textOnlyWithDoubao({ duration, request, intent, prompt, pe }) {
+async function textOnlyWithDoubao({ duration, request, intent, prompt, pe, conversationHistory, conversationSummary, editContext }) {
   const apiKey =
     process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || process.env.VOLC_ARK_API_KEY;
   const baseUrl = process.env.DOUBAO_ARK_BASE_URL || "https://ark.cn-beijing.volces.com/api/v3";
@@ -59,6 +65,7 @@ async function textOnlyWithDoubao({ duration, request, intent, prompt, pe }) {
     pe ? `PE: ${pe}` : null,
     intent ? `Intent: ${JSON.stringify(intent)}` : null,
     prompt ? `Prompt: ${prompt}` : null,
+    editContext || null,
     request ? `User request: ${request}` : null,
     duration ? `Video duration: ${duration}s` : null,
     "",
@@ -68,11 +75,14 @@ async function textOnlyWithDoubao({ duration, request, intent, prompt, pe }) {
     .filter(Boolean)
     .join("\n");
 
+  // 构建 multi-turn messages：system + 历史对话 + 当前请求
+  const historyMessages = formatHistoryForMessages(conversationHistory, 6, conversationSummary);
   const body = {
     model,
     messages: [
       { role: "system", content: AGENT_SYSTEM_PROMPT },
-      { role: "user", content: userText }, // 纯文本，不含 video_url
+      ...historyMessages,
+      { role: "user", content: userText },
     ],
     response_format: { type: "json_object" },
     stream: false,
@@ -113,7 +123,7 @@ async function textOnlyWithDoubao({ duration, request, intent, prompt, pe }) {
 /**
  * 根据当前配置的引擎（gemini / doubao / auto）调用对应的文本模式 provider。
  */
-export async function analyzeTextOnly({ engine, duration, request, intent, prompt, pe, onProgress = null }) {
+export async function analyzeTextOnly({ engine, duration, request, intent, prompt, pe, conversationHistory, conversationSummary, editContext, onProgress = null }) {
   const debugTimeline = [
     {
       time: new Date().toISOString(),
@@ -135,10 +145,10 @@ export async function analyzeTextOnly({ engine, duration, request, intent, promp
         (process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || process.env.VOLC_ARK_API_KEY))
     ) {
       onProgress?.("🧠 Doubao 文本推理中...");
-      result = await textOnlyWithDoubao({ duration, request, intent, prompt, pe });
+      result = await textOnlyWithDoubao({ duration, request, intent, prompt, pe, conversationHistory, conversationSummary, editContext });
     } else if (engine === "gemini" || (engine === "auto" && process.env.GEMINI_API_KEY)) {
       onProgress?.("🧠 Gemini 文本推理中...");
-      result = await textOnlyWithGemini({ duration, request, intent, prompt, pe });
+      result = await textOnlyWithGemini({ duration, request, intent, prompt, pe, conversationHistory, conversationSummary, editContext });
     } else {
       // 无可用 API key，返回空结果
       return {
