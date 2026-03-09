@@ -195,8 +195,36 @@ export default function App() {
         targetDuration: duration,
       };
     }
-    setTimeline(applyEditsToTimeline(baseTimeline, combinedEdits, duration));
+    const result = applyEditsToTimeline(baseTimeline, combinedEdits, duration);
+    setTimeline(result);
+
+    // 回传 timeline 构建结果到后端日志
+    fetch(`${apiBase}/api/log`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        context: "timeline-build",
+        message: "timeline constructed",
+        data: {
+          baseClips: baseTimeline.clips.map(c => ({ id: c.id, start: c.start, end: c.end, dur: c.duration })),
+          resultClips: result.clips.map(c => ({ id: c.id, start: c.start, end: c.end, timelineStart: c.timelineStart, displayDuration: c.displayDuration, playbackRate: c.playbackRate })),
+          totalTimelineDuration: result.totalTimelineDuration,
+          videoDuration: duration,
+          textEdits: result.textEdits,
+          fadeEdits: result.fadeEdits,
+        },
+      }),
+    }).catch(() => {});
   }, [features, intent, duration, combinedEdits, file]);
+
+  // timeline 变化后，用当前 media time 重新计算 playhead 位置
+  useEffect(() => {
+    if (!timeline || !videoRef.current) return;
+    const currentMediaTime = videoRef.current.currentTime;
+    const newPlayhead = mediaToTimeline(currentMediaTime);
+    playheadTimeRef.current = newPlayhead;
+    setPlayheadTime(newPlayhead);
+  }, [timeline]);
 
   useEffect(() => {
     if (!videoUrl || !duration) {
@@ -442,8 +470,8 @@ export default function App() {
     if (!totalDuration) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const scrollLeft = timelineRef.current.scrollLeft;
-    const x = e.clientX - rect.left + scrollLeft;
-    const totalWidth = rect.width * timelineScale;
+    const x = e.clientX - rect.left + scrollLeft - 48;
+    const totalWidth = rect.width * timelineScale - 48;
     const percentage = Math.max(0, Math.min(1, x / totalWidth));
 
     const targetTimelineTime = percentage * totalDuration;
@@ -549,6 +577,8 @@ export default function App() {
       time: new Date().toLocaleTimeString(),
       message: userRequest,
     });
+
+    setUserRequest("");
 
     try {
       const formData = new FormData();
@@ -1474,7 +1504,7 @@ export default function App() {
               for (let t = 0; t <= totalDur + 0.001; t += interval) {
                 const pct = (Math.min(t, totalDur) / totalDur) * 100;
                 marks.push(
-                  <span key={t} className="ruler-mark" style={{ left: `${pct}%` }}>
+                  <span key={t} className="ruler-mark" style={{ left: `calc(48px + (100% - 48px) * ${Math.min(t, totalDur) / totalDur})` }}>
                     {formatTime(Math.min(t, totalDur))}
                   </span>
                 );
@@ -1486,7 +1516,7 @@ export default function App() {
           <div className="timeline-tracks" style={{ width: `${timelineScale * 100}%` }}>
             <div
               className="timeline-playhead-full"
-              style={{ left: `${(playheadTime / (timeline?.totalTimelineDuration || duration || 1)) * 100}%` }}
+              style={{ left: `calc(48px + (100% - 48px) * ${playheadTime / (timeline?.totalTimelineDuration || duration || 1)})` }}
             >
               <div className="playhead-handle" onMouseDown={handlePlayheadMouseDown} />
             </div>
