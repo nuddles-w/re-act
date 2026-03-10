@@ -136,7 +136,7 @@ export async function analyzeVideoWithGemini({
   onProgress = null,
 }) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const modelName = "gemini-2.5-flash";
+  const modelName = "gemini-2.5-pro";
   const tStart = Date.now();
 
   const debugTimeline = [
@@ -211,6 +211,15 @@ export async function analyzeVideoWithGemini({
     try { agentPayload = JSON.parse(responseText); } catch (_) {}
 
     const features = parseFeatures(responseText, duration);
+
+    console.log(`[gemini:analyze] === LLM 原始响应 ===\n${responseText}`);
+    console.log(`[gemini:analyze] === 解析后特征 ===`, JSON.stringify({
+      segments: features.segments?.length ?? 0,
+      edits: features.edits?.length ?? 0,
+      events: features.events?.length ?? 0,
+      segmentDetails: features.segments?.map(s => ({ start: s.start, end: s.end, label: s.label })),
+      editDetails: features.edits,
+    }, null, 2));
 
     return {
       source: "gemini-agent",

@@ -406,6 +406,18 @@ export default function App() {
         setActiveClipId(null);
         setActiveClipState(null);
         activeClipRef.current = null;
+
+        // 处于两个 clip 之间的间隙 — 播放中则跳到下一个 clip
+        if (!videoRef.current.paused && timeline?.clips?.length) {
+          const nextClip = timeline.clips.find(c => c.start > currentTime + 0.01);
+          if (nextClip) {
+            videoRef.current.currentTime = nextClip.start;
+          } else {
+            // 已过最后一个 clip — 停止
+            videoRef.current.pause();
+            setIsPlaying(false);
+          }
+        }
       }
     }
 
@@ -1231,7 +1243,6 @@ export default function App() {
                 <select value={engine} onChange={(e) => setEngine(e.target.value)}>
                   <option value="auto">Auto</option>
                   <option value="gemini">Gemini</option>
-                  <option value="doubao">Doubao Seed 2.0</option>
                 </select>
               </label>
               {prepareStatus === "preparing" && <span className="prepare-status preparing">⏳ 预上传中…</span>}

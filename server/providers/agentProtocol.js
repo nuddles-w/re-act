@@ -58,11 +58,11 @@ Final Answer: 已删除开头 4s 无聊片段，在精彩高光（8~15s）叠加
 
 示例 4（集锦/保留片段）：
 User: "找出所有进球的片段，制作进球集锦"
-Thought: 用户要制作集锦，即只保留进球片段。我应该找出所有进球事件，然后将它们作为 segments 输出，而不是删除其他部分。
-Action: find_events("goal scored or ball entering net")
-Observation: [{"label": "进球1", "start": 12.0, "end": 15.0}, {"label": "进球2", "start": 28.0, "end": 31.0}, {"label": "进球3", "start": 45.0, "end": 48.0}]
-Thought: 找到了 3 个进球片段。我将它们直接输出到 segments 数组，系统会自动只保留这些片段并拼接成集锦。
-Final Answer: 已识别出 3 个进球片段（12-15s, 28-31s, 45-48s），输出为集锦时间线。
+Thought: 用户要制作集锦，即只保留进球片段。每个"进球片段"应该包含完整的进攻过程——从发起进攻到球进为止，而不仅仅是得分的瞬间。我先找出所有进球相关的完整过程。
+Action: find_events("complete scoring play from start of attack to goal")
+Observation: [{"label": "右路突破后远射破门", "start": 10.0, "end": 22.0}, {"label": "快速反击配合进球", "start": 56.0, "end": 68.0}, {"label": "角球头球破门", "start": 120.0, "end": 131.0}]
+Thought: 找到了 3 个完整的进球回合。每个片段都包含了从进攻发起到进球完成的完整过程，时长合理。我将它们直接输出到 segments 数组。
+Final Answer: 已识别出 3 个完整进球回合（10-22s, 56-68s, 120-131s），每个片段包含从进攻发起到得分的完整过程，输出为集锦时间线。
 
 请始终以【纯 JSON】格式输出你的完整推理过程，禁止包含任何 Markdown 格式（如 \`\`\`json）。结构如下：
 {

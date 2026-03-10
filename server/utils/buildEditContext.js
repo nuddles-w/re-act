@@ -73,6 +73,7 @@ export function formatHistoryForPrompt(history, maxTurns = 6, summary = null) {
     lines.push("");
   }
   for (const msg of recent) {
+    if (!msg.content?.trim()) continue;
     const role = msg.role === "user" ? "用户" : "AI";
     lines.push(`${role}: ${msg.content}`);
   }
@@ -100,6 +101,7 @@ export function formatHistoryForMessages(history, maxTurns = 6, summary = null) 
   if (history?.length) {
     const recent = history.slice(-maxTurns * 2);
     for (const msg of recent) {
+      if (!msg.content?.trim()) continue;
       messages.push({
         role: msg.role === "user" ? "user" : "assistant",
         content: msg.content,
