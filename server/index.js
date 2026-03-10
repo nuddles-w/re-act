@@ -13,6 +13,7 @@ import fs from "fs";
 import os from "os";
 import { createCanvas } from "canvas";
 import { searchAndDownloadBgm } from "./utils/fetchBgm.js";
+import { createLogger, appendToLog, getLatestRequestId } from "./utils/logger.js";
 import {
   createSession,
   getSession,
@@ -238,6 +239,7 @@ app.post("/api/prepare", upload.single("video"), (req, res) => {
 
 app.post("/api/analyze", upload.single("video"), async (req, res) => {
   const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const logger = createLogger(requestId);
 
   const videoFile = req.file;
   const sessionId = req.body.sessionId || null;
@@ -279,6 +281,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     if (existingSession) {
       // 有会话记忆，直接使用缓存的分析结果
       console.log(`[analyze:${requestId}] 使用会话缓存 ${sessionId}`);
+      logger.info("analyze", `使用会话缓存 ${sessionId}`);
       emitProgress("💾 使用已缓存的视频分析结果...");
 
       // 记录用户请求到对话历史
@@ -358,6 +361,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     }];
 
     console.log(`[analyze:${requestId}] start`, JSON.stringify({ name: videoFile.originalname, size: videoFile.size, duration, pe, request, engine }, null, 2));
+    logger.info("analyze", "start", { name: videoFile.originalname, size: videoFile.size, duration, pe, request, engine });
     emitProgress("🎬 收到请求，正在分析意图...");
 
     // Re-Act 智能路由
@@ -373,8 +377,10 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       if (prepared?.fileUri) {
         preloadedFile = prepared;
         console.log(`[analyze:${requestId}] 命中预上传缓存`);
+        logger.info("analyze", "命中预上传缓存");
       } else {
         console.warn(`[analyze:${requestId}] 预上传失败，回退完整流程`);
+        logger.warn("analyze", "预上传失败，回退完整流程");
         emitProgress("⚠️ 预上传未就绪，重新上传视频...");
       }
     }
@@ -402,6 +408,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       time: new Date().toISOString(), role: "system", level: "info", message: "识别完成",
       data: { source: result.source, edits: result.features?.edits?.length || 0 },
     });
+    logger.data("analyze", "debugTimeline", debugTimeline);
 
     console.log(`[analyze:${requestId}] done`, JSON.stringify({
       source: result.source,
@@ -409,6 +416,13 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       events: result.features?.events?.length || 0,
       edits: result.features?.edits?.length || 0,
     }, null, 2));
+    logger.data("analyze", "result.features", result.features);
+    logger.info("analyze", "done", {
+      source: result.source,
+      segmentCount: result.features?.segmentCount,
+      events: result.features?.events?.length || 0,
+      edits: result.features?.edits?.length || 0,
+    });
 
     // ── 创建新会话并缓存分析结果 ──────────────────────────────────
     const newSessionId = createSession(
@@ -429,14 +443,27 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       debug: { requestId, pe, request, prompt, engine },
       debugTimeline,
     });
+    if (result.rawResponse) {
+      logger.data("analyze", "rawResponse", result.rawResponse);
+    }
   } catch (error) {
     console.error(`[analyze:${requestId}] error`, String(error));
+    logger.error("analyze", "error", { message: String(error), stack: error.stack });
     emitError("识别异常：" + String(error), { requestId });
   } finally {
     if (videoFile?.path && fs.existsSync(videoFile.path)) {
       fs.unlinkSync(videoFile.path);
     }
   }
+});
+
+// ── 前端回传日志端点 ──
+app.post("/api/log", express.json(), (req, res) => {
+  const { requestId, context, message, data } = req.body;
+  const targetId = requestId || getLatestRequestId();
+  if (!targetId) return res.status(404).json({ ok: false, error: "no active logger" });
+  const ok = appendToLog(targetId, context || "frontend", message || "data", data);
+  res.json({ ok });
 });
 
 app.post("/api/export", upload.single("video"), async (req, res) => {
