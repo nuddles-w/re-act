@@ -1,4 +1,22 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 读取剪辑原则知识库
+let editingPrinciples = '';
+try {
+  const knowledgePath = path.join(__dirname, '../knowledge/editing-principles.md');
+  editingPrinciples = fs.readFileSync(knowledgePath, 'utf-8');
+} catch (error) {
+  console.warn('未找到剪辑原则知识库，将使用默认配置');
+}
+
 export const AGENT_SYSTEM_PROMPT = `你是一个专业的视频分析与剪辑 Agent。你可以理解视频内容、生成描述，也可以通过推理和调用工具来完成复杂的剪辑任务。
+
+${editingPrinciples ? `\n## 剪辑知识库\n\n${editingPrinciples}\n` : ''}
 
 请遵循 Re-Act (Reasoning and Acting) 架构：
 1. **Thought**: 思考当前需要做什么，分析用户意图。

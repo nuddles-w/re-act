@@ -67,6 +67,16 @@ export function cleanExpiredCache() {
 }
 
 /**
+ * 清空所有缓存
+ */
+export function clearCache() {
+  const size = cache.size;
+  cache.clear();
+  console.log(`[cache] cleared all ${size} entries`);
+  return size;
+}
+
+/**
  * 获取缓存统计
  */
 export function getCacheStats() {

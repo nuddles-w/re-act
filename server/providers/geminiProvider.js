@@ -12,18 +12,18 @@ import { formatHistoryForPrompt } from "../utils/buildEditContext.js";
 
 const resolveCompressionProfile = (duration, size) => {
   if (duration && duration >= 1800) {
-    return { maxWidth: 854, maxHeight: 480, fps: 0.5, audioBitrate: "32k" };
+    return { maxWidth: 854, maxHeight: 480, fps: 5, audioBitrate: "32k" };
   }
   if (duration && duration >= 900) {
-    return { maxWidth: 960, maxHeight: 540, fps: 1, audioBitrate: "48k" };
+    return { maxWidth: 960, maxHeight: 540, fps: 8, audioBitrate: "48k" };
   }
   if (size && size >= 800 * 1024 * 1024) {
-    return { maxWidth: 854, maxHeight: 480, fps: 0.5, audioBitrate: "32k" };
+    return { maxWidth: 854, maxHeight: 480, fps: 5, audioBitrate: "32k" };
   }
   if (size && size >= 200 * 1024 * 1024) {
-    return { maxWidth: 960, maxHeight: 540, fps: 1, audioBitrate: "48k" };
+    return { maxWidth: 960, maxHeight: 540, fps: 10, audioBitrate: "48k" };
   }
-  return { maxWidth: 1280, maxHeight: 720, fps: 2, audioBitrate: "64k" };
+  return { maxWidth: 1280, maxHeight: 720, fps: 12, audioBitrate: "64k" };
 };
 
 /**
@@ -53,13 +53,23 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null, comp
     // 计算视频 hash，检查缓存
     const videoHash = computeVideoHash(tempInputPath);
     const cached = getCachedFile(videoHash);
+
+    // 先压缩视频（用于调试），即使有缓存也执行
+    onProgress?.("📦 正在压缩视频...");
+    tempCompressedPath = tempInputPath.replace(/\.[^.]+$/, "") + "-compressed.mp4";
+
     if (cached) {
+      // 即使有缓存，也压缩一次用于调试
+      try {
+        const profile = compressionProfile || resolveCompressionProfile(video.duration || 0, video.size || 0);
+        await compressVideoForUpload(tempInputPath, tempCompressedPath, profile);
+        console.log(`[gemini:prepare] 已生成调试压缩文件（使用缓存，跳过上传）`);
+      } catch (e) {
+        console.warn(`[gemini:prepare] 调试压缩失败: ${e.message}`);
+      }
       onProgress?.("✅ 使用缓存的视频文件，无需重新上传");
       return cached;
     }
-
-    onProgress?.("📦 正在压缩视频...");
-    tempCompressedPath = tempInputPath.replace(/\.[^.]+$/, "") + "-compressed.mp4";
     let uploadPath = tempInputPath;
     try {
       const profile =
@@ -114,7 +124,13 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null, comp
     return result;
   } finally {
     if (cleanupInput && tempInputPath && fs.existsSync(tempInputPath)) fs.unlinkSync(tempInputPath);
-    if (tempCompressedPath && fs.existsSync(tempCompressedPath)) fs.unlinkSync(tempCompressedPath);
+    // 保留压缩文件用于调试
+    if (tempCompressedPath && fs.existsSync(tempCompressedPath)) {
+      const debugPath = path.join(os.tmpdir(), 'debug-compressed-latest.mp4');
+      fs.copyFileSync(tempCompressedPath, debugPath);
+      console.log(`[gemini:prepare] 压缩文件已保存到: ${debugPath}`);
+      fs.unlinkSync(tempCompressedPath);
+    }
   }
 }
 

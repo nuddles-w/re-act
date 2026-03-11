@@ -791,6 +791,12 @@ app.get("/api/cache/stats", (req, res) => {
   res.json(getCacheStats());
 });
 
+app.delete("/api/cache", async (req, res) => {
+  const { clearCache } = await import("./videoCache.js");
+  clearCache();
+  res.json({ success: true, message: "缓存已清空" });
+});
+
 const port = Number(process.env.PORT || 8787);
 app.listen(port, () => {
   console.log(`video-ai server listening on ${port}`);
