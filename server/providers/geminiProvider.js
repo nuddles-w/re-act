@@ -275,6 +275,11 @@ export async function runOrchestratorTurn({ messages }) {
   }));
 
   const result = await model.generateContent({ contents });
+  const usage = result.response.usageMetadata;
+  const costIn = (usage?.promptTokenCount || 0) * 0.30 / 1_000_000;
+  const costOut = (usage?.candidatesTokenCount || 0) * 2.50 / 1_000_000;
+  const costTotal = costIn + costOut;
+  console.log(`[token] orchestrator (flash) | in=${usage?.promptTokenCount} out=${usage?.candidatesTokenCount} total=${usage?.totalTokenCount} | cost=$${costTotal.toFixed(6)}`);
   return result.response.text();
 }
 
@@ -303,6 +308,16 @@ export async function analyzeVideoContent({ fileUri, mimeType, query, duration }
   ]);
 
   const text = result.response.text();
+  const usage = result.response.usageMetadata;
+  const promptTokens = usage?.promptTokenCount || 0;
+  const outputTokens = usage?.candidatesTokenCount || 0;
+  // Pro 定价：input $1.25/M (<=200k) 或 $2.50/M (>200k)，output $10/M (<=200k) 或 $15/M (>200k)
+  const inputRate = promptTokens <= 200000 ? 1.25 : 2.50;
+  const outputRate = promptTokens <= 200000 ? 10.00 : 15.00;
+  const costIn = promptTokens * inputRate / 1_000_000;
+  const costOut = outputTokens * outputRate / 1_000_000;
+  const costTotal = costIn + costOut;
+  console.log(`[token] analyzeContent (pro) | in=${promptTokens} out=${outputTokens} total=${usage?.totalTokenCount} | cost=$${costTotal.toFixed(6)}`);
   console.log(`[gemini:analyzeContent] 原始响应:\n${text.slice(0, 300)}`);
   try {
     return JSON.parse(text);
