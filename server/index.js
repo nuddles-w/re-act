@@ -1,12 +1,10 @@
 import "dotenv/config";
 import express from "express";
 import multer from "multer";
-import { analyzeVideoWithGemini, prepareGeminiUpload } from "./providers/geminiProvider.js";
-import { analyzeVideoWithDoubaoSeed } from "./providers/doubaoSeedProvider.js";
+import { prepareGeminiUpload } from "./providers/geminiProvider.js";
 import { analyzeWithMockAgent } from "./providers/mockAgentProvider.js";
 import { analyzeWithMock } from "./providers/mockProvider.js";
-import { analyzeTextOnly } from "./providers/textOnlyProvider.js";
-import { needsVideoAnalysis } from "./utils/intentClassifier.js";
+import { runAgentLoop } from "./providers/agentLoop.js";
 import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
@@ -171,27 +169,22 @@ app.get("/api/export/file/:fileId", (req, res) => {
 });
 
 const PROVIDERS = {
-  gemini: analyzeVideoWithGemini,
-  doubao: analyzeVideoWithDoubaoSeed,
+  gemini: runAgentLoop,
   mock: analyzeWithMock,
   "mock-agent": analyzeWithMockAgent,
 };
 
 const resolveEngine = (req) => {
   const engineRaw = String(req.body.engine || "").trim();
-  if (engineRaw) return engineRaw;
-
+  if (engineRaw && engineRaw !== "doubao") return engineRaw;
   const isMock = req.body.isMock === "true";
   if (isMock) return "mock-agent";
-
   return "auto";
 };
 
 const resolveProvider = (engine) => {
   if (engine === "auto") {
     if (process.env.GEMINI_API_KEY) return PROVIDERS.gemini;
-    if (process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || process.env.VOLC_ARK_API_KEY)
-      return PROVIDERS.doubao;
     console.warn("[analyze] no provider key found, fallback to mock");
     return PROVIDERS.mock;
   }
@@ -279,129 +272,60 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     const existingSession = sessionId ? getSession(sessionId) : null;
 
     if (existingSession) {
-      // 有会话记忆，直接使用缓存的分析结果
+      // 有会话记忆，复用已缓存的视频分析结果
       console.log(`[analyze:${requestId}] 使用会话缓存 ${sessionId}`);
       logger.info("analyze", `使用会话缓存 ${sessionId}`);
       emitProgress("💾 使用已缓存的视频分析结果...");
-
-      // 记录用户请求到对话历史
       addConversation(sessionId, { role: "user", content: request });
-
-      // 如果是纯文本编辑请求（不需要重新分析视频）
-      const skipVideoUpload = engine !== "mock" && engine !== "mock-agent" && !needsVideoAnalysis(request);
-
-      if (skipVideoUpload) {
-        // 纯文本编辑：基于已有的 features 进行增量编辑
-        emitProgress("✏️ 处理编辑指令...");
-
-        const conversationHistory = getConversationHistory(sessionId);
-        const conversationSummary = getConversationSummary(sessionId);
-        const editContext = buildEditContext(existingSession);
-
-        const result = await analyzeTextOnly({
-          engine,
-          duration: existingSession.videoInfo.duration,
-          request,
-          intent,
-          prompt,
-          pe,
-          conversationHistory,
-          conversationSummary,
-          editContext,
-          onProgress: emitProgress,
-        });
-
-        // 更新会话的 features（增量合并）
-        if (result.features) {
-          const mergedFeatures = {
-            ...existingSession.analysisResult.features,
-            edits: [
-              ...(existingSession.analysisResult.features.edits || []),
-              ...(result.features.edits || []),
-            ],
-          };
-          updateSessionFeatures(sessionId, mergedFeatures);
-        }
-
-        // 记录 AI 响应
-        addConversation(sessionId, { role: "assistant", content: result.summary || "编辑完成" });
-
-        // 检查是否需要压缩对话历史
-        const updatedHistory = getConversationHistory(sessionId);
-        if (needsCompression(updatedHistory)) {
-          compressConversation(updatedHistory, getConversationSummary(sessionId))
-            .then(({ summary, keptHistory }) => applyCompression(sessionId, summary, keptHistory))
-            .catch(err => console.warn(`[compress] failed for ${sessionId}: ${err.message}`));
-        }
-
-        emitResult({
-          sessionId,
-          source: result.source,
-          features: result.features,
-          summary: result.summary,
-          rawResponse: result.rawResponse,
-          debug: { requestId, pe, request, prompt, engine, cached: true },
-          debugTimeline: result.debugTimeline || [],
-        });
-        return;
-      } else {
-        // 需要重新分析视频（例如"找出所有笑脸"），但可以复用已上传的视频
-        emitProgress("🔄 重新分析视频内容...");
-        // 这里暂时还是走完整流程，后续可以优化为复用已上传的视频 URI
-      }
     }
 
     // ── 新会话或需要完整分析 ──────────────────────────────────────
-    if (!videoFile) { emitError("missing_video: 需要重新上传视频文件以重新分析"); return; }
+    if (!videoFile && !existingSession) { emitError("missing_video: 需要上传视频文件"); return; }
 
     const debugTimeline = [{
       time: new Date().toISOString(), role: "system", level: "info",
       message: "收到识别请求",
-      data: { name: videoFile.originalname, size: videoFile.size, duration, pe, request, engine },
+      data: { name: videoFile?.originalname, size: videoFile?.size, duration, pe, request, engine },
     }];
 
-    console.log(`[analyze:${requestId}] start`, JSON.stringify({ name: videoFile.originalname, size: videoFile.size, duration, pe, request, engine }, null, 2));
-    logger.info("analyze", "start", { name: videoFile.originalname, size: videoFile.size, duration, pe, request, engine });
-    emitProgress("🎬 收到请求，正在分析意图...");
+    console.log(`[analyze:${requestId}] start`, JSON.stringify({ name: videoFile?.originalname, size: videoFile?.size, duration, pe, request, engine }, null, 2));
+    logger.info("analyze", "start", { name: videoFile?.originalname, size: videoFile?.size, duration, pe, request, engine });
+    emitProgress("🎬 收到请求，开始 ReAct 推理...");
 
-    // Re-Act 智能路由
-    const skipVideoUpload = engine !== "mock" && engine !== "mock-agent" && !needsVideoAnalysis(request);
-
-    // 检查 Gemini 预上传
-    const prepareId = req.body.prepareId || null;
-    let preloadedFile = null;
-    if (prepareId && prepareMap.has(prepareId) && engine !== "mock" && engine !== "mock-agent") {
-      const entry = prepareMap.get(prepareId);
-      prepareMap.delete(prepareId);
-      const prepared = await entry.promise;
-      if (prepared?.fileUri) {
-        preloadedFile = prepared;
-        console.log(`[analyze:${requestId}] 命中预上传缓存`);
-        logger.info("analyze", "命中预上传缓存");
-      } else {
-        console.warn(`[analyze:${requestId}] 预上传失败，回退完整流程`);
-        logger.warn("analyze", "预上传失败，回退完整流程");
-        emitProgress("⚠️ 预上传未就绪，重新上传视频...");
-      }
-    }
-
-    const video = {
+    const video = videoFile ? {
       name: videoFile.originalname,
       size: videoFile.size,
       mimeType: videoFile.mimetype,
       buffer: videoFile.buffer,
       path: videoFile.path,
       duration,
-    };
+    } : null;
 
-    // 如果是已有会话的重新分析，取出历史和编辑状态
+    // 已有会话：取历史、编辑状态、缓存的 fileUri
     const conversationHistory = existingSession ? getConversationHistory(sessionId) : [];
     const conversationSummary = existingSession ? getConversationSummary(sessionId) : null;
     const editContext = existingSession ? buildEditContext(existingSession) : "";
+    const cachedFileUri = existingSession?.analysisResult?.fileUri ?? null;
+    const cachedMimeType = existingSession?.analysisResult?.fileMimeType ?? null;
+    const effectiveDuration = existingSession ? existingSession.videoInfo.duration : duration;
 
-    const result = skipVideoUpload
-      ? await analyzeTextOnly({ engine, duration, request, intent, prompt, pe, conversationHistory, conversationSummary, editContext, onProgress: emitProgress })
-      : await provider({ video, duration, intent, prompt, request, pe, preloadedFile, conversationHistory, conversationSummary, editContext, onProgress: emitProgress });
+    let result;
+    if (engine === "mock" || engine === "mock-agent") {
+      const mockProvider = PROVIDERS[engine];
+      result = await mockProvider({ video, duration: effectiveDuration, intent, prompt, request, pe, conversationHistory, conversationSummary, editContext, onProgress: emitProgress });
+    } else {
+      result = await runAgentLoop({
+        video,
+        cachedFileUri,
+        cachedMimeType,
+        duration: effectiveDuration,
+        request,
+        conversationHistory,
+        conversationSummary,
+        editContext,
+        onProgress: emitProgress,
+      });
+    }
 
     if (Array.isArray(result.debugTimeline)) debugTimeline.push(...result.debugTimeline);
     debugTimeline.push({
@@ -425,14 +349,42 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     });
 
     // ── 创建新会话并缓存分析结果 ──────────────────────────────────
-    const newSessionId = createSession(
-      { name: videoFile.originalname, size: videoFile.size, duration, path: videoFile.path },
-      { features: result.features, source: result.source, summary: result.summary }
+    const newSessionId = existingSession ? sessionId : createSession(
+      { name: videoFile?.originalname, size: videoFile?.size, duration: effectiveDuration, path: videoFile?.path },
+      {
+        features: result.features,
+        source: result.source,
+        summary: result.summary,
+        fileUri: result.uploadedFileUri ?? cachedFileUri ?? null,
+        fileMimeType: result.uploadedFileMimeType ?? cachedMimeType ?? null,
+      }
     );
 
-    // 记录初始对话
-    addConversation(newSessionId, { role: "user", content: request });
-    addConversation(newSessionId, { role: "assistant", content: result.summary || "分析完成" });
+    // 记录对话（existing session 已在前面记录了 user，这里只加 assistant）
+    if (existingSession) {
+      // 更新会话 features（增量合并 edits）
+      if (result.features) {
+        const mergedFeatures = {
+          ...existingSession.analysisResult.features,
+          edits: [
+            ...(existingSession.analysisResult.features.edits || []),
+            ...(result.features.edits || []),
+          ],
+        };
+        updateSessionFeatures(newSessionId, mergedFeatures);
+      }
+      addConversation(newSessionId, { role: "assistant", content: result.features?.summary || "编辑完成" });
+      // 检查是否需要压缩对话历史
+      const updatedHistory = getConversationHistory(newSessionId);
+      if (needsCompression(updatedHistory)) {
+        compressConversation(updatedHistory, getConversationSummary(newSessionId))
+          .then(({ summary, keptHistory }) => applyCompression(newSessionId, summary, keptHistory))
+          .catch(err => console.warn(`[compress] failed for ${newSessionId}: ${err.message}`));
+      }
+    } else {
+      addConversation(newSessionId, { role: "user", content: request });
+      addConversation(newSessionId, { role: "assistant", content: result.features?.summary || "分析完成" });
+    }
 
     emitResult({
       sessionId: newSessionId,

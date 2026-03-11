@@ -5,7 +5,7 @@ import path from "path";
 import os from "os";
 import { buildMockFeatures } from "../utils/mockFeatures.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
-import { AGENT_SYSTEM_PROMPT } from "./agentProtocol.js";
+import { AGENT_SYSTEM_PROMPT, ANALYZE_VIDEO_SYSTEM_PROMPT } from "./agentProtocol.js";
 import { compressVideoForUpload } from "../utils/compressVideo.js";
 import { computeVideoHash, getCachedFile, setCachedFile } from "../videoCache.js";
 import { formatHistoryForPrompt } from "../utils/buildEditContext.js";
@@ -252,5 +252,61 @@ export async function analyzeVideoWithGemini({
     // if (activeFile?.fileMetadata && activeFile?.fileManager) {
     //   activeFile.fileManager.deleteFile(activeFile.fileMetadata.name).catch(() => {});
     // }
+  }
+}
+
+/**
+ * Orchestrator：单轮文本推理（gemini-2.5-flash，无视频）
+ * messages 格式：[{ role: "user"|"model", content: string }, ...]
+ * 返回模型输出的原始字符串（JSON）
+ */
+export async function runOrchestratorTurn({ messages }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction: AGENT_SYSTEM_PROMPT,
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const contents = messages.map((m) => ({
+    role: m.role === "model" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  const result = await model.generateContent({ contents });
+  return result.response.text();
+}
+
+/**
+ * 视频内容分析器：用 gemini-2.5-pro + 已上传视频分析内容
+ * 返回 { description: string, events: [{label, start, end, confidence}] }
+ */
+export async function analyzeVideoContent({ fileUri, mimeType, query, duration }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-pro",
+    systemInstruction: ANALYZE_VIDEO_SYSTEM_PROMPT,
+    generationConfig: { responseMimeType: "application/json" },
+  });
+
+  const prompt = [
+    query ? `重点分析：${query}` : "分析所有重要事件和场景",
+    `视频时长: ${duration}s`,
+    "返回视频内容描述和完整事件列表，时间精确到小数点后一位。",
+  ].join("\n");
+
+  const result = await model.generateContent([
+    { fileData: { mimeType, fileUri } },
+    { text: prompt },
+  ]);
+
+  const text = result.response.text();
+  console.log(`[gemini:analyzeContent] 原始响应:\n${text.slice(0, 300)}`);
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return { description: text, events: [] };
   }
 }

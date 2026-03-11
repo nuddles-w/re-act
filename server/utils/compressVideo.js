@@ -25,6 +25,7 @@ export function compressVideoForUpload(inputPath, outputPath, options = {}) {
       "-vf", `scale=${maxWidth}:${maxHeight}:force_original_aspect_ratio=decrease`,
       "-r", String(fps),
       "-c:v", "h264",
+      "-pix_fmt", "yuv420p",
       "-preset", "ultrafast",
       "-crf", "28",
       "-c:a", "aac",
