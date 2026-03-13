@@ -26,6 +26,9 @@ import {
 import { cleanExpiredCache, getCacheStats } from "./videoCache.js";
 import { buildEditContext } from "./utils/buildEditContext.js";
 import { needsCompression, compressConversation } from "./utils/conversationSummarizer.js";
+import { getDraftManager } from "./draftManager.js";
+import { aiOutputToDraft } from "./converters/aiToDraft.js";
+import { draftToTimeline } from "./converters/draftToTimeline.js";
 
 /**
  * 用 canvas 生成一张透明背景的文字 PNG，返回文件路径
@@ -315,6 +318,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       result = await mockProvider({ video, duration: effectiveDuration, intent, prompt, request, pe, conversationHistory, conversationSummary, editContext, onProgress: emitProgress });
     } else {
       result = await runAgentLoop({
+        sessionId,
         video,
         cachedFileUri,
         cachedMimeType,
@@ -347,6 +351,29 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       events: result.features?.events?.length || 0,
       edits: result.features?.edits?.length || 0,
     });
+
+    // ── 转换 AI 输出为 Draft ──────────────────────────────────────
+    if (result.features && sessionId) {
+      const draftManager = getDraftManager();
+      const videoSource = {
+        name: videoFile?.originalname || "video",
+        path: videoFile?.path || "",
+        duration: effectiveDuration,
+        width: 1920,
+        height: 1080,
+        fps: 30,
+      };
+
+      const draft = aiOutputToDraft(result.features, videoSource, sessionId);
+
+      // 更新 draft 到 DraftManager
+      draftManager.updateDraft(sessionId, {
+        type: "replace_draft",
+        data: { draft },
+      });
+
+      console.log(`[analyze:${requestId}] draft created with ${draft.tracks.length} tracks`);
+    }
 
     // ── 创建新会话并缓存分析结果 ──────────────────────────────────
     const newSessionId = existingSession ? sessionId : createSession(
@@ -747,6 +774,37 @@ app.delete("/api/cache", async (req, res) => {
   const { clearCache } = await import("./videoCache.js");
   clearCache();
   res.json({ success: true, message: "缓存已清空" });
+});
+
+// ── Draft API ──────────────────────────────────────────────────
+
+app.get("/api/draft/:sessionId", (req, res) => {
+  const { sessionId } = req.params;
+  const draftManager = getDraftManager();
+
+  try {
+    const draft = draftManager.getDraft(sessionId);
+    res.json({ success: true, draft });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/update-draft", express.json(), (req, res) => {
+  const { sessionId, changes } = req.body;
+
+  if (!sessionId || !changes) {
+    return res.status(400).json({ success: false, error: "Missing sessionId or changes" });
+  }
+
+  const draftManager = getDraftManager();
+
+  try {
+    const draft = draftManager.updateDraft(sessionId, changes);
+    res.json({ success: true, draft });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 const port = Number(process.env.PORT || 8787);

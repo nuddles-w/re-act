@@ -49,10 +49,51 @@ ${editingPrinciples ? `\n## 剪辑知识库\n\n${editingPrinciples}\n` : ''}
 
 可用工具：
 
+## 视频分析工具
+
 analyze_video(query?: string)
   分析视频画面内容，返回场景描述和带时间戳的事件列表。
   仅在需要理解视频画面内容时调用（如"找出进球片段"、"删除无聊部分"、"制作集锦"）。
   不需要画面理解的操作（裁剪到指定时间、加文字、变速、淡入淡出等）直接输出 edits，无需调用。
+
+## 草稿管理工具
+
+read_draft(detail_level?: "summary" | "full")
+  读取当前剪辑草稿的完整状态。
+
+  **何时使用**：
+  1. ✅ 用户使用相对指令（"再快一点"、"更亮一些"）
+  2. ✅ 用户使用指代词（"刚才那个"、"第一个文字"）
+  3. ✅ 需要批量操作（"所有文字"、"每个片段"）
+  4. ✅ 修改现有内容（"把标题改成红色"）
+  5. ✅ 需要了解时间轴布局（"在文字后面加效果"）
+
+  **何时不用**：
+  1. ❌ 首次分析视频内容
+  2. ❌ 添加全新的独立元素（不依赖现有内容）
+  3. ❌ 用户明确指定了绝对参数（"在 5 秒处加文字"）
+
+  返回：{ draft: {...}, changesSince: {...} }
+
+add_segment(track_id: string, segment: object)
+  在指定轨道添加新片段。
+  track_id: "V1"(视频), "T1"(文字), "FX1"(效果), "A1"(音频)
+  segment: { timelineStart, timelineDuration, ... }
+
+modify_segment(segment_id: string, modifications: object)
+  修改现有片段的属性。
+  示例: modify_segment("seg-v1-001", { playbackRate: 3.0 })
+
+delete_segment(segment_id: string)
+  删除指定片段。
+
+split_segment(segment_id: string, split_time: number)
+  在指定时间点分割片段。
+
+move_segment(segment_id: string, new_timeline_start: number)
+  移动片段到新的时间位置。
+
+## 传统编辑工具（向后兼容）
 
 split_video(start: number, end: number)
 delete_segment(start: number, end: number)
@@ -63,8 +104,10 @@ fade_out(start: number, duration: number)
 add_bgm(keywords: string, volume?: number)
 
 决策原则：
-- 制作集锦 / 只保留某些片段 → 将要保留的片段输出到 segments 数组（不用 delete_segment 逐一删除）
-- 结构性编辑（时间已知）→ 直接在 final_answer 中输出 edits，不调用 analyze_video
+- 首次分析：使用传统工具输出 edits，系统会自动转换为 draft
+- 多轮修改：先 read_draft 了解当前状态，再使用 add/modify/delete_segment 精确操作
+- 制作集锦 / 只保留某些片段 → 将要保留的片段输出到 segments 数组
+- 结构性编辑（时间已知）→ 直接在 final_answer 中输出 edits
 - 需要根据画面内容定位片段 → 先调用 analyze_video，再根据返回的 events 决策
 
 禁止输出 Markdown 代码块，只输出纯 JSON。`;

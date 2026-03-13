@@ -14,6 +14,9 @@
 import { prepareGeminiUpload, analyzeVideoContent, runOrchestratorTurn } from "./geminiProvider.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
 import { formatHistoryForPrompt } from "../utils/buildEditContext.js";
+import { getDraftManager } from "../draftManager.js";
+import { buildDraftHint, buildReadDraftGuidance } from "../utils/draftHelpers.js";
+import { executeDraftTool } from "../tools/draftTools.js";
 
 const MAX_ROUNDS = 8;
 
@@ -21,6 +24,12 @@ const MAX_ROUNDS = 8;
 const STRUCTURAL_TOOLS = new Set([
   "split_video", "delete_segment", "adjust_speed",
   "add_text", "fade_in", "fade_out", "add_bgm",
+]);
+
+// ── Draft 工具集 ──────────────────────────────────────────────────
+const DRAFT_TOOLS = new Set([
+  "read_draft", "add_segment", "modify_segment",
+  "delete_segment", "split_segment", "move_segment",
 ]);
 
 /**
@@ -41,20 +50,32 @@ function parseAction(actionStr) {
   }
 }
 
-function buildInitialMessage({ request, duration, conversationHistory, conversationSummary, editContext }) {
+function buildInitialMessage({ request, duration, conversationHistory, conversationSummary, editContext, sessionId }) {
   const historyText = formatHistoryForPrompt(conversationHistory, 6, conversationSummary);
+
+  // 获取 draft 提示
+  const draftManager = getDraftManager();
+  const draft = draftManager.getDraft(sessionId);
+  const draftHint = buildDraftHint(draft);
+
+  // 智能引导
+  const guidance = buildReadDraftGuidance(request, conversationHistory);
+
   return [
+    draftHint,
     editContext || null,
     historyText || null,
     `用户指令: "${request || "分析并剪辑视频"}"`,
     `视频时长: ${duration}s`,
+    guidance || null,
     historyText ? "请结合对话历史和当前编辑状态理解用户意图，支持指代（如'刚才那个''再快一点'）。" : null,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 /**
  * 主入口
  * @param {object} opts
+ * @param {string}  opts.sessionId          - 会话 ID
  * @param {object}  opts.video              - { name, size, mimeType, buffer?, path?, duration }
  * @param {string}  opts.cachedFileUri      - 已上传视频的 fileUri（会话复用）
  * @param {string}  opts.cachedMimeType     - 对应 mimeType
@@ -66,6 +87,7 @@ function buildInitialMessage({ request, duration, conversationHistory, conversat
  * @param {Function} opts.onProgress
  */
 export async function runAgentLoop({
+  sessionId,
   video,
   cachedFileUri,
   cachedMimeType,
@@ -98,7 +120,7 @@ export async function runAgentLoop({
   const messages = [];
   messages.push({
     role: "user",
-    content: buildInitialMessage({ request, duration, conversationHistory, conversationSummary, editContext }),
+    content: buildInitialMessage({ request, duration, conversationHistory, conversationSummary, editContext, sessionId }),
   });
 
   let lastResponseText = null;
@@ -174,7 +196,15 @@ export async function runAgentLoop({
 
     let observation;
 
-    if (toolName === "analyze_video") {
+    // ── Draft 工具 ────────────────────────────────────────────────
+    if (DRAFT_TOOLS.has(toolName)) {
+      onProgress?.(`🔧 执行 ${toolName}...`);
+      observation = await executeDraftTool(toolName, args, sessionId);
+      logEntry.observation = observation;
+      console.log(`[agentLoop] ${toolName} → ${JSON.stringify(observation).slice(0, 100)}`);
+
+    // ── 视频分析工具 ──────────────────────────────────────────────
+    } else if (toolName === "analyze_video") {
       const query = args[0] || "";
       onProgress?.(`🔍 分析视频内容${query ? `（${query}）` : ""}...`);
 
@@ -207,10 +237,13 @@ export async function runAgentLoop({
           stats.videoAnalysisCalls++;
         }
       }
+
+    // ── 结构性编辑工具（向后兼容）──────────────────────────────────
     } else if (STRUCTURAL_TOOLS.has(toolName)) {
       // 结构性编辑工具：不需要执行，只是告知模型已记录
       observation = { ok: true };
       logEntry.observation = { ok: true };
+
     } else {
       observation = { ok: true, note: `unknown tool: ${toolName}` };
       logEntry.observation = observation;
