@@ -20,6 +20,7 @@ export default function App() {
   const [features, setFeatures] = useState(null);
   const [intent, setIntent] = useState(defaultIntent);
   const [timeline, setTimeline] = useState(null);
+  const [draft, setDraft] = useState(null); // 新增：Draft 状态
   const [activeClipId, setActiveClipId] = useState(null);
   const [analysisStatus, setAnalysisStatus] = useState("idle");
   const [analysisSource, setAnalysisSource] = useState("local");
@@ -170,6 +171,40 @@ export default function App() {
       { id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, ...message },
     ]);
   };
+
+  // 获取 Draft
+  const fetchDraft = useCallback(async (sid) => {
+    if (!sid) return;
+    try {
+      const response = await fetch(`${apiBase}/api/draft/${sid}`);
+      const data = await response.json();
+      if (data.success) {
+        setDraft(data.draft);
+        console.log("[fetchDraft] Draft loaded:", data.draft);
+      }
+    } catch (error) {
+      console.error("[fetchDraft] Error:", error);
+    }
+  }, [apiBase]);
+
+  // 更新 Draft（本地修改）
+  const updateDraftLocally = useCallback(async (changes) => {
+    if (!sessionId) return;
+    try {
+      const response = await fetch(`${apiBase}/api/update-draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, changes }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setDraft(data.draft);
+        console.log("[updateDraft] Draft updated:", data.draft);
+      }
+    } catch (error) {
+      console.error("[updateDraft] Error:", error);
+    }
+  }, [sessionId, apiBase]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -656,6 +691,8 @@ export default function App() {
             // 保存会话 ID
             if (data.sessionId) {
               setSessionId(data.sessionId);
+              // 获取 Draft
+              fetchDraft(data.sessionId);
             }
 
             setFeatures(prev => ({
@@ -1211,6 +1248,32 @@ export default function App() {
               ))}
               <div ref={chatEndRef} />
             </div>
+
+            {/* Draft 信息面板 */}
+            {draft && (
+              <div className="draft-info" style={{
+                marginTop: '12px',
+                padding: '12px',
+                background: 'rgba(255,255,255,0.05)',
+                borderRadius: '6px',
+                fontSize: '12px',
+                color: '#999'
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#fff' }}>
+                  📋 Draft 状态
+                </div>
+                <div>总时长: {draft.settings?.totalDuration?.toFixed(1)}s</div>
+                <div>轨道数: {draft.tracks?.length || 0}</div>
+                {draft.tracks?.map(track => (
+                  <div key={track.id} style={{ marginLeft: '8px', marginTop: '4px' }}>
+                    • {track.id} ({track.type}): {track.segments?.length || 0} 片段
+                  </div>
+                ))}
+                <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.7 }}>
+                  版本: {draft.version || 1}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="sidebar-middle">
