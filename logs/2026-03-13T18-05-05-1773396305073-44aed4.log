@@ -359,3 +359,29 @@
   "textEdits": [],
   "fadeEdits": []
 }
+[18:26:54.386] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [],
+  "resultClips": [
+    {
+      "id": "split-0.00-2.80",
+      "start": 0,
+      "end": 2.8,
+      "timelineStart": 0,
+      "displayDuration": 2.8,
+      "playbackRate": 1
+    },
+    {
+      "id": "split-8.90-15.77",
+      "start": 8.9,
+      "end": 15.766667,
+      "timelineStart": 2.8,
+      "displayDuration": 6.866667,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 9.666667,
+  "videoDuration": 15.766667,
+  "textEdits": [],
+  "fadeEdits": []
+}

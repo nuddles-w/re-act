@@ -1251,14 +1251,6 @@ export default function App() {
           </div>
 
           <div className="sidebar-bottom">
-            <div className="pe-input-area">
-              <input 
-                type="text" 
-                value={pe} 
-                onChange={(e) => setPe(e.target.value)} 
-                placeholder="Persona/PE: 剪辑产品经理..."
-              />
-            </div>
             <div className="debug-mock-mode">
               <label>
                 <input 
