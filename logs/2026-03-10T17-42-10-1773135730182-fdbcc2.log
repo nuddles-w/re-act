@@ -1,0 +1,76 @@
+[17:42:10.183] [INFO] [analyze] start
+{
+  "name": "copy_82686DD8-F002-4FA8-B545-ABFC1926F0E6.MOV",
+  "size": 370336100,
+  "duration": 231.133333,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "把这个视频剪辑成一个适合发到抖音的集锦，加一点文字说明描述",
+  "engine": "auto"
+}
+[17:42:11.423] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-10T09:42:10.182Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "copy_82686DD8-F002-4FA8-B545-ABFC1926F0E6.MOV",
+      "size": 370336100,
+      "duration": 231.133333,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "把这个视频剪辑成一个适合发到抖音的集锦，加一点文字说明描述",
+      "engine": "auto"
+    }
+  },
+  {
+    "time": "2026-03-10T09:42:10.183Z",
+    "role": "system",
+    "level": "info",
+    "message": "跳过视频上传，使用文本模式推理（操作无需视频内容理解）",
+    "data": {
+      "engine": "auto",
+      "request": "把这个视频剪辑成一个适合发到抖音的集锦，加一点文字说明描述"
+    }
+  },
+  {
+    "time": "2026-03-10T09:42:11.423Z",
+    "role": "system",
+    "level": "error",
+    "message": "文本模式推理失败",
+    "data": {
+      "error": "Error: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent: [400 Bad Request] User location is not supported for the API use."
+    }
+  },
+  {
+    "time": "2026-03-10T09:42:11.423Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "text-only-error",
+      "edits": 0
+    }
+  }
+]
+[17:42:11.424] [DATA] [analyze] result.features
+{
+  "edits": [],
+  "events": [],
+  "segments": []
+}
+[17:42:11.424] [INFO] [analyze] done
+{
+  "source": "text-only-error",
+  "events": 0,
+  "edits": 0
+}
+[17:42:11.441] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [],
+  "resultClips": [],
+  "totalTimelineDuration": 0,
+  "videoDuration": 231.133333,
+  "textEdits": [],
+  "fadeEdits": []
+}

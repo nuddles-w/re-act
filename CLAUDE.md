@@ -35,6 +35,55 @@ node server/debug/smokeDeleteEdit.js
 
 ## Architecture
 
+### Draft 架构（2026-03-13 新增）
+
+项目已升级为专业的多轨道 Draft 架构，支持多轮对话和增量更新。
+
+**核心概念：**
+- **Draft**: 剪辑项目的完整状态，包含多个轨道（video, audio, text, effect）
+- **Track**: 轨道，每个轨道包含多个 segments
+- **Segment**: 片段，是轨道上的基本单元（视频片段、文字、效果等）
+
+**数据流（新架构）：**
+```
+User request + video file
+  → runAgentLoop()                           [agentLoop.js]
+  → AI 按需调用工具：
+      - analyze_video                        [视频内容分析]
+      - read_draft                           [读取当前草稿]
+      - add_segment / modify_segment / delete_segment  [操作片段]
+  → AI 输出 → aiOutputToDraft()             [converters/aiToDraft.js]
+  → Draft (多轨道结构)                       [draftModel.js]
+  → DraftManager 保存 + 变更追踪            [draftManager.js]
+  → draftToTimeline()                        [converters/draftToTimeline.js] — 向后兼容
+  → React timeline UI                        [App.jsx]
+  → Export: FFmpeg filter_complex            [server/index.js /api/export]
+```
+
+**Draft 工具（AI 可用）：**
+- `read_draft()` - AI 按需读取草稿（智能引导：相对指令、指代词时自动提示）
+- `add_segment(trackId, segment)` - 添加片段到轨道
+- `modify_segment(segmentId, modifications)` - 修改现有片段
+- `delete_segment(segmentId)` - 删除片段
+- `split_segment(segmentId, splitTime)` - 分割片段
+- `move_segment(segmentId, newTimelineStart)` - 移动片段
+
+**多轮对话支持：**
+- 每个会话有独立的 Draft 状态（sessionId）
+- 变更历史自动记录（diff + 快照）
+- AI 自主判断何时需要读取 Draft
+- 支持相对指令（"再快一点"）和指代消解（"把刚才那个删掉"）
+
+**关键文件：**
+- `src/domain/draftModel.js` - Draft 数据模型
+- `server/draftManager.js` - 状态管理器（单例）
+- `server/tools/draftTools.js` - Draft 工具执行器
+- `server/converters/aiToDraft.js` - AI 输出 → Draft
+- `server/converters/draftToTimeline.js` - Draft → Timeline（兼容）
+- `server/converters/draftToFFmpeg.js` - Draft → FFmpeg（预留）
+
+详见：`docs/draft-implementation-summary.md` 和 `docs/draft-e2e-testing.md`
+
 ### Data flow (end-to-end)
 
 ```

@@ -1,0 +1,150 @@
+[17:45:00.656] [INFO] [analyze] 使用会话缓存 sess-1773135731424-qerr6b1
+[17:45:12.025] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "10.50-25.00",
+      "start": 10.5,
+      "end": 25,
+      "dur": 14.5
+    },
+    {
+      "id": "40.00-55.00",
+      "start": 40,
+      "end": 55,
+      "dur": 15
+    },
+    {
+      "id": "105.00-120.00",
+      "start": 105,
+      "end": 120,
+      "dur": 15
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "10.50-25.00",
+      "start": 10.5,
+      "end": 25,
+      "timelineStart": 0,
+      "displayDuration": 14.5,
+      "playbackRate": 1
+    },
+    {
+      "id": "40.00-55.00",
+      "start": 40,
+      "end": 55,
+      "timelineStart": 14.5,
+      "displayDuration": 15,
+      "playbackRate": 1
+    },
+    {
+      "id": "105.00-120.00",
+      "start": 105,
+      "end": 120,
+      "timelineStart": 29.5,
+      "displayDuration": 15,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 44.5,
+  "videoDuration": 231.133333,
+  "textEdits": [
+    {
+      "type": "text",
+      "start": 10.5,
+      "end": 25,
+      "text": "精彩瞬间，不容错过！",
+      "position": "bottom",
+      "timelineStart": 0,
+      "timelineEnd": 14.5
+    },
+    {
+      "type": "text",
+      "start": 40,
+      "end": 55,
+      "text": "高光时刻，等你发现！",
+      "position": "bottom",
+      "timelineStart": 14.5,
+      "timelineEnd": 29.5
+    },
+    {
+      "type": "text",
+      "start": 70,
+      "end": 88,
+      "text": "快来看这个！",
+      "position": "bottom",
+      "timelineStart": 70,
+      "timelineEnd": 88
+    },
+    {
+      "type": "text",
+      "start": 105,
+      "end": 120,
+      "text": "这才是精华！",
+      "position": "bottom",
+      "timelineStart": 29.5,
+      "timelineEnd": 44.5
+    },
+    {
+      "type": "text",
+      "start": 140,
+      "end": 155,
+      "text": "完美收官，惊喜不断！",
+      "position": "bottom",
+      "timelineStart": 140,
+      "timelineEnd": 155
+    }
+  ],
+  "fadeEdits": []
+}
+[18:10:17.436] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 358.561667,
+      "dur": 358.561667
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 358.561667,
+      "timelineStart": 0,
+      "displayDuration": 358.561667,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 358.561667,
+  "videoDuration": 358.561667,
+  "textEdits": [],
+  "fadeEdits": []
+}
+[18:12:05.882] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 358.561667,
+      "dur": 358.561667
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 358.561667,
+      "timelineStart": 0,
+      "displayDuration": 358.561667,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 358.561667,
+  "videoDuration": 358.561667,
+  "textEdits": [],
+  "fadeEdits": []
+}
