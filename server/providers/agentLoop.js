@@ -78,6 +78,16 @@ export async function runAgentLoop({
 }) {
   const apiKey = process.env.GEMINI_API_KEY;
   const debugTimeline = [];
+  const startTime = Date.now();
+
+  // Token 和成本统计
+  const stats = {
+    totalTokensIn: 0,
+    totalTokensOut: 0,
+    totalCost: 0,
+    orchestratorCalls: 0,
+    videoAnalysisCalls: 0,
+  };
 
   // 已上传的视频文件（analyze_video tool 调用时填充）
   let uploadedFile = cachedFileUri
@@ -96,9 +106,19 @@ export async function runAgentLoop({
   for (let round = 0; round < MAX_ROUNDS; round++) {
     onProgress?.(`🧠 推理第 ${round + 1} 轮...`);
 
-    let responseText;
+    let responseText, usage;
     try {
-      responseText = await runOrchestratorTurn({ messages });
+      const result = await runOrchestratorTurn({ messages });
+      responseText = result.text;
+      usage = result.usage;
+
+      // 累计 orchestrator token 统计
+      if (usage) {
+        stats.totalTokensIn += usage.promptTokenCount || 0;
+        stats.totalTokensOut += usage.candidatesTokenCount || 0;
+        stats.totalCost += usage.cost || 0;
+        stats.orchestratorCalls++;
+      }
     } catch (e) {
       console.error(`[agentLoop] round ${round + 1} LLM error:`, e.message);
       debugTimeline.push({ round: round + 1, error: String(e) });
@@ -117,10 +137,31 @@ export async function runAgentLoop({
 
     // ── 任务完成 ──────────────────────────────────────────────────
     if (parsed.final_answer != null) {
+      const totalTime = Date.now() - startTime;
       const features = parseFeatures(responseText, duration);
+
+      // 构建性能摘要
+      const performanceSummary = {
+        totalTime: `${(totalTime / 1000).toFixed(1)}s`,
+        rounds: round + 1,
+        tokensIn: stats.totalTokensIn,
+        tokensOut: stats.totalTokensOut,
+        totalTokens: stats.totalTokensIn + stats.totalTokensOut,
+        cost: `$${stats.totalCost.toFixed(4)}`,
+        orchestratorCalls: stats.orchestratorCalls,
+        videoAnalysisCalls: stats.videoAnalysisCalls,
+      };
+
+      console.log(`[agentLoop] ✅ 完成 | 耗时=${performanceSummary.totalTime} 轮数=${performanceSummary.rounds} tokens=${performanceSummary.totalTokens} 成本=${performanceSummary.cost}`);
+
       return {
         source: "agent-loop",
-        features: { ...features, summary: parsed.final_answer, agentSteps: debugTimeline },
+        features: {
+          ...features,
+          summary: parsed.final_answer,
+          agentSteps: debugTimeline,
+          performance: performanceSummary,
+        },
         rawResponse: responseText,
         debugTimeline,
         uploadedFileUri: uploadedFile?.fileUri ?? null,
@@ -157,6 +198,14 @@ export async function runAgentLoop({
         observation = analysis;
         logEntry.observation = { events: analysis.events?.length, description: analysis.description?.slice(0, 80) };
         console.log(`[agentLoop] analyze_video → ${analysis.events?.length ?? 0} events`);
+
+        // 累计视频分析 token 统计
+        if (analysis.usage) {
+          stats.totalTokensIn += analysis.usage.promptTokenCount || 0;
+          stats.totalTokensOut += analysis.usage.candidatesTokenCount || 0;
+          stats.totalCost += analysis.usage.cost || 0;
+          stats.videoAnalysisCalls++;
+        }
       }
     } else if (STRUCTURAL_TOOLS.has(toolName)) {
       // 结构性编辑工具：不需要执行，只是告知模型已记录

@@ -280,7 +280,16 @@ export async function runOrchestratorTurn({ messages }) {
   const costOut = (usage?.candidatesTokenCount || 0) * 2.50 / 1_000_000;
   const costTotal = costIn + costOut;
   console.log(`[token] orchestrator (flash) | in=${usage?.promptTokenCount} out=${usage?.candidatesTokenCount} total=${usage?.totalTokenCount} | cost=$${costTotal.toFixed(6)}`);
-  return result.response.text();
+
+  return {
+    text: result.response.text(),
+    usage: {
+      promptTokenCount: usage?.promptTokenCount || 0,
+      candidatesTokenCount: usage?.candidatesTokenCount || 0,
+      totalTokenCount: usage?.totalTokenCount || 0,
+      cost: costTotal,
+    },
+  };
 }
 
 /**
@@ -320,8 +329,26 @@ export async function analyzeVideoContent({ fileUri, mimeType, query, duration }
   console.log(`[token] analyzeContent (pro) | in=${promptTokens} out=${outputTokens} total=${usage?.totalTokenCount} | cost=$${costTotal.toFixed(6)}`);
   console.log(`[gemini:analyzeContent] 原始响应:\n${text.slice(0, 300)}`);
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    return {
+      ...parsed,
+      usage: {
+        promptTokenCount: promptTokens,
+        candidatesTokenCount: outputTokens,
+        totalTokenCount: usage?.totalTokenCount || 0,
+        cost: costTotal,
+      },
+    };
   } catch (_) {
-    return { description: text, events: [] };
+    return {
+      description: text,
+      events: [],
+      usage: {
+        promptTokenCount: promptTokens,
+        candidatesTokenCount: outputTokens,
+        totalTokenCount: usage?.totalTokenCount || 0,
+        cost: costTotal,
+      },
+    };
   }
 }

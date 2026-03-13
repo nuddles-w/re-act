@@ -681,10 +681,22 @@ export default function App() {
               ? data.features.summary
               : `识别完成！找到 ${data.features?.events?.length || 0} 个事件和 ${data.features?.segments?.length || 0} 个片段。`;
 
+            // 添加性能统计信息
+            let performanceInfo = "";
+            if (data.features?.performance) {
+              const perf = data.features.performance;
+              performanceInfo = `\n\n📊 性能统计：\n` +
+                `⏱️ 总耗时: ${perf.totalTime}\n` +
+                `🔄 推理轮数: ${perf.rounds}\n` +
+                `🎯 Token 消耗: ${perf.totalTokens.toLocaleString()} (输入: ${perf.tokensIn.toLocaleString()}, 输出: ${perf.tokensOut.toLocaleString()})\n` +
+                `💰 成本: ${perf.cost}\n` +
+                `📞 API 调用: Orchestrator ${perf.orchestratorCalls}次, 视频分析 ${perf.videoAnalysisCalls}次`;
+            }
+
             appendChatMessage({
               role: "assistant",
               time: new Date().toLocaleTimeString(),
-              message: summaryMessage,
+              message: summaryMessage + performanceInfo,
             });
 
           } else if (payload.type === "error") {
