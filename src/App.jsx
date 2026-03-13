@@ -1212,10 +1212,6 @@ export default function App() {
       <header className="editor-header">
         <div className="header-left">
           <div className="app-logo">C</div>
-          <nav className="header-nav">
-            <span>Transcript</span>
-            <span className="active">Media</span>
-          </nav>
         </div>
         <div className="header-center">
           项目识别 - {file?.name || "未命名"}
