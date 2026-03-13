@@ -146,19 +146,41 @@ body {
 
 /* Sidebar */
 .editor-sidebar {
-  width: 320px;
+  width: 420px;
   background: var(--bg-dark);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  resize: horizontal;
+  overflow: auto;
+  min-width: 320px;
+  max-width: 600px;
 }
 
-.sidebar-top, .sidebar-middle {
+.sidebar-top {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
   border-bottom: 1px solid var(--border);
+}
+
+.sidebar-bottom {
+  padding: 16px;
+  background: var(--bg-panel);
+}
+
+/* Right Panel */
+.editor-right-panel {
+  width: 320px;
+  background: var(--bg-dark);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  resize: horizontal;
+  min-width: 280px;
+  max-width: 500px;
 }
 
 .section-title {
@@ -253,6 +275,73 @@ body {
 .sidebar-bottom {
   padding: 16px;
   background: var(--bg-darker);
+}
+
+/* Draft Info Panel */
+.draft-info-panel {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.draft-info-content {
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+.draft-info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.draft-info-row .label {
+  color: var(--text-muted);
+}
+
+.draft-info-row .value {
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.draft-tracks {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.draft-track-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.draft-track-item .track-id {
+  font-weight: bold;
+  color: var(--accent);
+  min-width: 30px;
+}
+
+.draft-track-item .track-type {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.draft-track-item .track-segments {
+  margin-left: auto;
+  color: var(--text-main);
+}
+
+.draft-version {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .pe-input-area input {

@@ -1248,49 +1248,6 @@ export default function App() {
               ))}
               <div ref={chatEndRef} />
             </div>
-
-            {/* Draft 信息面板 */}
-            {draft && (
-              <div className="draft-info" style={{
-                marginTop: '12px',
-                padding: '12px',
-                background: 'rgba(255,255,255,0.05)',
-                borderRadius: '6px',
-                fontSize: '12px',
-                color: '#999'
-              }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#fff' }}>
-                  📋 Draft 状态
-                </div>
-                <div>总时长: {draft.settings?.totalDuration?.toFixed(1)}s</div>
-                <div>轨道数: {draft.tracks?.length || 0}</div>
-                {draft.tracks?.map(track => (
-                  <div key={track.id} style={{ marginLeft: '8px', marginTop: '4px' }}>
-                    • {track.id} ({track.type}): {track.segments?.length || 0} 片段
-                  </div>
-                ))}
-                <div style={{ marginTop: '8px', fontSize: '11px', opacity: 0.7 }}>
-                  版本: {draft.version || 1}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="sidebar-middle">
-            <div className="section-title">Media</div>
-            <div className="media-grid">
-              {file ? (
-                <div className="media-card">
-                  <div className="media-preview">
-                    {thumbnails[0] ? <img src={thumbnails[0].image} alt="preview" /> : <div className="placeholder" />}
-                    <span className="media-duration">{formatTime(duration)}</span>
-                  </div>
-                  <div className="media-info">{file.name}</div>
-                </div>
-              ) : (
-                <div className="empty-media">暂无素材</div>
-              )}
-            </div>
           </div>
 
           <div className="sidebar-bottom">
@@ -1527,6 +1484,52 @@ export default function App() {
             </div>
           )}
         </section>
+
+        <aside className="editor-right-panel">
+          <div className="section-title">Media</div>
+          <div className="media-grid">
+            {file ? (
+              <div className="media-card">
+                <div className="media-preview">
+                  {thumbnails[0] ? <img src={thumbnails[0].image} alt="preview" /> : <div className="placeholder" />}
+                  <span className="media-duration">{formatTime(duration)}</span>
+                </div>
+                <div className="media-info">{file.name}</div>
+              </div>
+            ) : (
+              <div className="empty-media">暂无素材</div>
+            )}
+          </div>
+
+          {/* Draft 信息面板 */}
+          {draft && (
+            <div className="draft-info-panel">
+              <div className="section-title">Draft 状态</div>
+              <div className="draft-info-content">
+                <div className="draft-info-row">
+                  <span className="label">总时长:</span>
+                  <span className="value">{draft.settings?.totalDuration?.toFixed(1)}s</span>
+                </div>
+                <div className="draft-info-row">
+                  <span className="label">轨道数:</span>
+                  <span className="value">{draft.tracks?.length || 0}</span>
+                </div>
+                <div className="draft-tracks">
+                  {draft.tracks?.map(track => (
+                    <div key={track.id} className="draft-track-item">
+                      <span className="track-id">{track.id}</span>
+                      <span className="track-type">({track.type})</span>
+                      <span className="track-segments">{track.segments?.length || 0} 片段</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="draft-version">
+                  版本: {draft.version || 1}
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
       </main>
 
       <footer className="editor-timeline">
