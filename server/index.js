@@ -352,29 +352,6 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       edits: result.features?.edits?.length || 0,
     });
 
-    // ── 转换 AI 输出为 Draft ──────────────────────────────────────
-    if (result.features && sessionId) {
-      const draftManager = getDraftManager();
-      const videoSource = {
-        name: videoFile?.originalname || "video",
-        path: videoFile?.path || "",
-        duration: effectiveDuration,
-        width: 1920,
-        height: 1080,
-        fps: 30,
-      };
-
-      const draft = aiOutputToDraft(result.features, videoSource, sessionId);
-
-      // 更新 draft 到 DraftManager
-      draftManager.updateDraft(sessionId, {
-        type: "replace_draft",
-        data: { draft },
-      });
-
-      console.log(`[analyze:${requestId}] draft created with ${draft.tracks.length} tracks`);
-    }
-
     // ── 创建新会话并缓存分析结果 ──────────────────────────────────
     const newSessionId = existingSession ? sessionId : createSession(
       { name: videoFile?.originalname, size: videoFile?.size, duration: effectiveDuration, path: videoFile?.path },
@@ -386,6 +363,29 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         fileMimeType: result.uploadedFileMimeType ?? cachedMimeType ?? null,
       }
     );
+
+    // ── 转换 AI 输出为 Draft（使用 newSessionId）──────────────────
+    if (result.features && newSessionId) {
+      const draftManager = getDraftManager();
+      const videoSource = {
+        name: videoFile?.originalname || "video",
+        path: videoFile?.path || "",
+        duration: effectiveDuration,
+        width: 1920,
+        height: 1080,
+        fps: 30,
+      };
+
+      const draft = aiOutputToDraft(result.features, videoSource, newSessionId);
+
+      // 更新 draft 到 DraftManager
+      draftManager.updateDraft(newSessionId, {
+        type: "replace_draft",
+        data: { draft },
+      });
+
+      console.log(`[analyze:${requestId}] draft created with ${draft.tracks.length} tracks`);
+    }
 
     // 记录对话（existing session 已在前面记录了 user，这里只加 assistant）
     if (existingSession) {
