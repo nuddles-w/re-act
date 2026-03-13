@@ -428,7 +428,32 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
   } catch (error) {
     console.error(`[analyze:${requestId}] error`, String(error));
     logger.error("analyze", "error", { message: String(error), stack: error.stack });
-    emitError("识别异常：" + String(error), { requestId });
+
+    // 提取友好的错误信息
+    let userMessage = "识别异常";
+    const errorStr = String(error);
+
+    if (errorStr.includes("503") && errorStr.includes("high demand")) {
+      userMessage = "❌ Gemini 模型当前负载过高，请稍后重试（通常几分钟后恢复）";
+    } else if (errorStr.includes("429") || errorStr.includes("quota")) {
+      userMessage = "❌ API 配额已用完，请检查 API Key 或稍后重试";
+    } else if (errorStr.includes("401") || errorStr.includes("API key")) {
+      userMessage = "❌ API Key 无效或未配置，请检查 .env 文件";
+    } else if (errorStr.includes("timeout")) {
+      userMessage = "❌ 请求超时，请检查网络连接或稍后重试";
+    } else if (errorStr.includes("ECONNREFUSED") || errorStr.includes("network")) {
+      userMessage = "❌ 网络连接失败，请检查网络设置";
+    } else {
+      // 通用错误，显示简化的错误信息
+      const match = errorStr.match(/Error: (.+?)(?:\n|$)/);
+      if (match) {
+        userMessage = `❌ ${match[1]}`;
+      } else {
+        userMessage = `❌ 识别异常：${errorStr.substring(0, 200)}`;
+      }
+    }
+
+    emitError(userMessage, { requestId, fullError: errorStr });
   } finally {
     if (videoFile?.path && fs.existsSync(videoFile.path)) {
       fs.unlinkSync(videoFile.path);

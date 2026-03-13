@@ -411,3 +411,53 @@
   "textEdits": [],
   "fadeEdits": []
 }
+[18:29:03.342] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 15.766667,
+      "dur": 15.766667
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 15.766667,
+      "timelineStart": 0,
+      "displayDuration": 15.766667,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 15.766667,
+  "videoDuration": 15.766667,
+  "textEdits": [],
+  "fadeEdits": []
+}
+[18:29:18.810] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 15.766667,
+      "dur": 15.766667
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 15.766667,
+      "timelineStart": 0,
+      "displayDuration": 15.766667,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 15.766667,
+  "videoDuration": 15.766667,
+  "textEdits": [],
+  "fadeEdits": []
+}
