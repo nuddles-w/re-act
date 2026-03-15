@@ -27,7 +27,7 @@ export default function App() {
   const [activeClipId, setActiveClipId] = useState(null);
   const [analysisStatus, setAnalysisStatus] = useState("idle");
   const [analysisSource, setAnalysisSource] = useState("local");
-  const [userRequest, setUserRequest] = useState("识别视频中鸡蛋被捣碎的时间起始点");
+  const [userRequest, setUserRequest] = useState("");
   const [pe, setPe] = useState("短视频剪辑产品经理（PE）");
   const [chatMessages, setChatMessages] = useState([]);
   const [playheadTime, setPlayheadTime] = useState(0);
@@ -1761,6 +1761,23 @@ export default function App() {
               </div>
             </div>
 
+            <div className="track track-a1">
+              <div className="track-id">A1</div>
+              <div className="track-content">
+                <div className="waveform-placeholder" />
+                {timeline?.bgmEdits?.map((edit, i) => (
+                  <div
+                    key={i}
+                    className="bgm-edit-node"
+                    style={{ left: 0, width: "100%" }}
+                    title={`BGM: ${edit.keywords || "背景音乐"}`}
+                  >
+                    🎵 {edit.keywords || "背景音乐"}
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="track track-events">
               <div className="track-id">E1</div>
               <div className="track-content">
@@ -1829,31 +1846,6 @@ export default function App() {
                 })}
               </div>
             </div>
-
-            <div className="track track-a1">
-              <div className="track-id">A1</div>
-              <div className="track-content">
-                <div className="waveform-placeholder" />
-              </div>
-            </div>
-
-            {timeline?.bgmEdits?.length > 0 && (
-              <div className="track track-bgm">
-                <div className="track-id">B1</div>
-                <div className="track-content">
-                  {timeline.bgmEdits.map((edit, i) => (
-                    <div
-                      key={i}
-                      className="bgm-edit-node"
-                      style={{ left: 0, width: "100%" }}
-                      title={`BGM: ${edit.keywords} (vol: ${edit.volume ?? 0.3})`}
-                    >
-                      <span className="bgm-label">♪ {edit.keywords}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </footer>

@@ -314,34 +314,74 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     const effectiveDuration = existingSession ? existingSession.videoInfo.duration : duration;
 
     let result;
+    let usedEngine = engine;
+
     if (engine === "mock" || engine === "mock-agent") {
       const mockProvider = PROVIDERS[engine];
       result = await mockProvider({ video, duration: effectiveDuration, intent, prompt, request, pe, conversationHistory, conversationSummary, editContext, onProgress: emitProgress });
     } else {
-      result = await runAgentLoop({
-        engine,
-        sessionId,
-        video,
-        cachedFileUri,
-        cachedMimeType,
-        duration: effectiveDuration,
-        request,
-        conversationHistory,
-        conversationSummary,
-        editContext,
-        onProgress: emitProgress,
-      });
+      // 尝试主引擎
+      try {
+        result = await runAgentLoop({
+          engine,
+          sessionId,
+          video,
+          cachedFileUri,
+          cachedMimeType,
+          duration: effectiveDuration,
+          request,
+          conversationHistory,
+          conversationSummary,
+          editContext,
+          onProgress: emitProgress,
+        });
+      } catch (primaryError) {
+        console.error(`[analyze:${requestId}] ${engine} failed:`, primaryError.message);
+        emitProgress(`⚠️ ${engine} 识别失败，尝试切换到备用模型...`);
+
+        // 确定备用引擎
+        const fallbackEngine = engine === "gemini" ? "doubao" : "gemini";
+        const fallbackApiKey = fallbackEngine === "gemini"
+          ? process.env.GEMINI_API_KEY
+          : (process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || process.env.VOLC_ARK_API_KEY);
+
+        if (!fallbackApiKey) {
+          throw new Error(`主引擎 ${engine} 失败，且备用引擎 ${fallbackEngine} 未配置 API Key`);
+        }
+
+        console.log(`[analyze:${requestId}] fallback to ${fallbackEngine}`);
+        emitProgress(`🔄 切换到 ${fallbackEngine}...`);
+
+        // 重试备用引擎
+        result = await runAgentLoop({
+          engine: fallbackEngine,
+          sessionId,
+          video,
+          cachedFileUri: null, // 不复用缓存，因为不同引擎
+          cachedMimeType: null,
+          duration: effectiveDuration,
+          request,
+          conversationHistory,
+          conversationSummary,
+          editContext,
+          onProgress: emitProgress,
+        });
+
+        usedEngine = fallbackEngine;
+        console.log(`[analyze:${requestId}] fallback success with ${fallbackEngine}`);
+      }
     }
 
     if (Array.isArray(result.debugTimeline)) debugTimeline.push(...result.debugTimeline);
     debugTimeline.push({
       time: new Date().toISOString(), role: "system", level: "info", message: "识别完成",
-      data: { source: result.source, edits: result.features?.edits?.length || 0 },
+      data: { source: result.source, engine: usedEngine, edits: result.features?.edits?.length || 0 },
     });
     logger.data("analyze", "debugTimeline", debugTimeline);
 
     console.log(`[analyze:${requestId}] done`, JSON.stringify({
       source: result.source,
+      engine: usedEngine,
       segmentCount: result.features?.segmentCount,
       events: result.features?.events?.length || 0,
       edits: result.features?.edits?.length || 0,

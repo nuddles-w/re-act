@@ -74,6 +74,7 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null, comp
     try {
       const profile =
         compressionProfile || resolveCompressionProfile(video.duration || 0, video.size || 0);
+      onProgress?.(`🔧 压缩视频中 (${profile.maxWidth}x${profile.maxHeight} @ ${profile.fps}fps)...`);
       const compressResult = await compressVideoForUpload(tempInputPath, tempCompressedPath, profile);
       const ratio = ((1 - compressResult.outputSize / compressResult.inputSize) * 100).toFixed(0);
       console.log(
@@ -82,7 +83,7 @@ export async function prepareGeminiUpload(video, apiKey, onProgress = null, comp
         `${(compressResult.outputSize / 1024 / 1024).toFixed(1)}MB (-${ratio}%)`
       );
       uploadPath = tempCompressedPath;
-      onProgress?.(`📦 压缩完成（缩小 ${ratio}%），正在上传到 Gemini...`);
+      onProgress?.(`📦 压缩完成 (${profile.maxWidth}x${profile.maxHeight} @ ${profile.fps}fps, 缩小 ${ratio}%)，正在上传到 Gemini...`);
     } catch (e) {
       console.warn(`[gemini:prepare] compress failed, uploading original: ${e.message}`);
       onProgress?.("⬆️ 正在上传视频到 Gemini...");

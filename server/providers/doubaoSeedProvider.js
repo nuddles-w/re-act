@@ -231,9 +231,11 @@ export async function prepareDoubaoUpload(video, apiKey, onProgress = null) {
     tempCompressedPath = inputPath.replace(/\.[^.]+$/, "") + "-compressed.mp4";
 
     try {
-      await compressVideoForUpload(inputPath, tempCompressedPath, profile);
+      onProgress?.(`🔧 压缩视频中 (${profile.maxWidth}x${profile.maxHeight} @ ${profile.fps}fps)...`);
+      const compressResult = await compressVideoForUpload(inputPath, tempCompressedPath, profile);
+      const ratio = ((1 - compressResult.outputSize / compressResult.inputSize) * 100).toFixed(0);
       uploadPath = tempCompressedPath;
-      onProgress?.("📦 压缩完成，正在上传到 Doubao...");
+      onProgress?.(`📦 压缩完成 (${profile.maxWidth}x${profile.maxHeight} @ ${profile.fps}fps, 缩小 ${ratio}%)，正在上传到 Doubao...`);
     } catch (e) {
       console.warn(`[doubao] compress failed, uploading original: ${e.message}`);
       uploadPath = inputPath;

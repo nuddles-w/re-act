@@ -1,13 +1,40 @@
 import crypto from "crypto";
 import fs from "fs";
+import path from "path";
+import os from "os";
 
 /**
  * 视频缓存管理器
  * 缓存 Gemini 上传后的 fileUri，避免重复上传和处理
+ * 持久化到文件系统，服务重启后仍然有效
  */
 
-const cache = new Map();
+const CACHE_FILE = path.join(os.tmpdir(), 'video-cache.json');
 const CACHE_TTL = 48 * 3600 * 1000; // 48 小时（Gemini 文件过期时间）
+
+// 从文件加载缓存
+let cache = new Map();
+try {
+  if (fs.existsSync(CACHE_FILE)) {
+    const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8'));
+    cache = new Map(Object.entries(data));
+    console.log(`[cache] loaded ${cache.size} entries from disk`);
+  }
+} catch (e) {
+  console.warn('[cache] failed to load from disk:', e.message);
+}
+
+/**
+ * 保存缓存到文件
+ */
+function saveCacheToDisk() {
+  try {
+    const data = Object.fromEntries(cache.entries());
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('[cache] failed to save to disk:', e.message);
+  }
+}
 
 /**
  * 计算视频文件的 hash
@@ -46,6 +73,7 @@ export function setCachedFile(videoHash, fileInfo) {
     uploadTime: Date.now(),
   });
   console.log(`[cache] set: ${videoHash} (total: ${cache.size})`);
+  saveCacheToDisk();
 }
 
 /**
@@ -62,6 +90,7 @@ export function cleanExpiredCache() {
   }
   if (cleaned > 0) {
     console.log(`[cache] cleaned ${cleaned} expired entries`);
+    saveCacheToDisk();
   }
   return cleaned;
 }
@@ -73,6 +102,7 @@ export function clearCache() {
   const size = cache.size;
   cache.clear();
   console.log(`[cache] cleared all ${size} entries`);
+  saveCacheToDisk();
   return size;
 }
 

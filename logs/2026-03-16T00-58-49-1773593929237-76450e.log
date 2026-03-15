@@ -1,0 +1,39 @@
+[00:58:49.268] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "0.00-29.88",
+      "start": 0,
+      "end": 29.880138916666667,
+      "dur": 29.880138916666667
+    },
+    {
+      "id": "298.80-328.68",
+      "start": 298.8013891666667,
+      "end": 328.6815280833333,
+      "dur": 29.880138916666624
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "0.00-29.88",
+      "start": 0,
+      "end": 29.880138916666667,
+      "timelineStart": 0,
+      "displayDuration": 29.880138916666667,
+      "playbackRate": 1
+    },
+    {
+      "id": "298.80-328.68",
+      "start": 298.8013891666667,
+      "end": 328.6815280833333,
+      "timelineStart": 29.880138916666667,
+      "displayDuration": 29.880138916666624,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 59.76027783333329,
+  "videoDuration": 358.561667,
+  "textEdits": [],
+  "fadeEdits": []
+}
