@@ -173,13 +173,14 @@ app.get("/api/export/file/:fileId", (req, res) => {
 
 const PROVIDERS = {
   gemini: runAgentLoop,
+  doubao: runAgentLoop,
   mock: analyzeWithMock,
   "mock-agent": analyzeWithMockAgent,
 };
 
 const resolveEngine = (req) => {
   const engineRaw = String(req.body.engine || "").trim();
-  if (engineRaw && engineRaw !== "doubao") return engineRaw;
+  if (engineRaw) return engineRaw;
   const isMock = req.body.isMock === "true";
   if (isMock) return "mock-agent";
   return "auto";
@@ -318,6 +319,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       result = await mockProvider({ video, duration: effectiveDuration, intent, prompt, request, pe, conversationHistory, conversationSummary, editContext, onProgress: emitProgress });
     } else {
       result = await runAgentLoop({
+        engine,
         sessionId,
         video,
         cachedFileUri,
@@ -443,6 +445,19 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       userMessage = "❌ 请求超时，请检查网络连接或稍后重试";
     } else if (errorStr.includes("ECONNREFUSED") || errorStr.includes("network")) {
       userMessage = "❌ 网络连接失败，请检查网络设置";
+    } else if (errorStr.includes("Doubao file upload error")) {
+      // Doubao 特定错误
+      if (errorStr.includes("Purpose must be user_data")) {
+        userMessage = "❌ Doubao 文件上传失败：purpose 参数错误。这是一个已知问题，正在修复中。建议暂时使用 Gemini 引擎。";
+      } else if (errorStr.includes("fps must be greater than")) {
+        userMessage = "❌ Doubao 视频帧率超出范围（需要 0.2-5.0 fps）。请联系开发者。";
+      } else if (errorStr.includes("File processing failed")) {
+        userMessage = "❌ Doubao 视频处理超时或失败，请稍后重试或使用较小的视频文件。";
+      } else {
+        userMessage = `❌ Doubao 上传失败：${errorStr.match(/message":"([^"]+)"/)?.[1] || "未知错误"}`;
+      }
+    } else if (errorStr.includes("FFmpeg compress exited")) {
+      userMessage = "❌ 视频压缩失败。可能是视频格式不支持或 FFmpeg 配置问题。";
     } else {
       // 通用错误，显示简化的错误信息
       const match = errorStr.match(/Error: (.+?)(?:\n|$)/);
@@ -601,23 +616,31 @@ app.post("/api/export", upload.single("video"), async (req, res) => {
       if (bgmEdits.length > 0) {
         const bgmEdit = bgmEdits[0]; // 只取第一条 BGM 指令
         try {
-          console.log(`[export:${requestId}] 搜索背景音乐: "${bgmEdit.keywords}"`);
-          const bgm = await searchAndDownloadBgm(bgmEdit.keywords, requestId);
-          console.log(`[export:${requestId}] BGM: ${bgm.title} - ${bgm.artist}`);
-          bgmPath = bgm.path;
+          if (!process.env.JAMENDO_CLIENT_ID) {
+            console.warn(`[export:${requestId}] BGM 功能需要配置 JAMENDO_CLIENT_ID（跳过）`);
+            emitProgress(50, "⚠️ 背景音乐功能需要配置 JAMENDO_CLIENT_ID，已跳过");
+          } else {
+            console.log(`[export:${requestId}] 搜索背景音乐: "${bgmEdit.keywords}"`);
+            emitProgress(50, `🎵 搜索背景音乐: ${bgmEdit.keywords}...`);
+            const bgm = await searchAndDownloadBgm(bgmEdit.keywords, requestId);
+            console.log(`[export:${requestId}] BGM: ${bgm.title} - ${bgm.artist}`);
+            emitProgress(55, `✅ 找到音乐: ${bgm.title} - ${bgm.artist}`);
+            bgmPath = bgm.path;
 
-          const bgmVol = Math.min(1, Math.max(0, bgmEdit.volume ?? 0.3));
-          const totalDurSec = timeline.totalTimelineDuration || 60;
-          const fadeOutSt = Math.max(0, totalDurSec - 2).toFixed(2);
-          // BGM 输入 index = 1（视频）+ textPngPaths.length
-          const bgmIdx = 1 + textPngPaths.length;
+            const bgmVol = Math.min(1, Math.max(0, bgmEdit.volume ?? 0.3));
+            const totalDurSec = timeline.totalTimelineDuration || 60;
+            const fadeOutSt = Math.max(0, totalDurSec - 2).toFixed(2);
+            // BGM 输入 index = 1（视频）+ textPngPaths.length
+            const bgmIdx = 1 + textPngPaths.length;
 
-          // 对 BGM 单独做音量 + 淡入淡出，再与原声 amix
-          filterComplex += `;[${bgmIdx}:a]volume=${bgmVol},afade=t=in:d=1:st=0,afade=t=out:st=${fadeOutSt}:d=2[bgmaudio]`;
-          filterComplex += `;${finalAudioLabel}[bgmaudio]amix=inputs=2:duration=first:normalize=0[outa]`;
-          finalAudioLabel = "[outa]";
+            // 对 BGM 单独做音量 + 淡入淡出，再与原声 amix
+            filterComplex += `;[${bgmIdx}:a]volume=${bgmVol},afade=t=in:d=1:st=0,afade=t=out:st=${fadeOutSt}:d=2[bgmaudio]`;
+            filterComplex += `;${finalAudioLabel}[bgmaudio]amix=inputs=2:duration=first:normalize=0[outa]`;
+            finalAudioLabel = "[outa]";
+          }
         } catch (e) {
           console.warn(`[export:${requestId}] BGM 获取失败（跳过）: ${e.message}`);
+          emitProgress(50, `⚠️ 背景音乐获取失败: ${e.message}`);
           // BGM 失败不阻断导出，静默跳过
         }
       }

@@ -23,6 +23,7 @@ npm run dev
 Environment variables live in `.env`. Required keys:
 - `GEMINI_API_KEY` — Google Gemini
 - `DOUBAO_API_KEY` / `ARK_API_KEY` / `VOLC_ARK_API_KEY` — Doubao Seed 2.0
+- `JAMENDO_CLIENT_ID` — (optional) for background music feature
 - `PORT` — backend port (default 8787)
 - `VITE_API_BASE_URL` — frontend points here (default `http://localhost:8787`)
 
@@ -31,6 +32,7 @@ Debug scripts (run standalone):
 npm run debug:analyze          # analyze a local video file without frontend
 node server/debug/testParser.js
 node server/debug/smokeDeleteEdit.js
+node server/debug/testBgm.js   # test background music search and download
 ```
 
 ## Architecture
