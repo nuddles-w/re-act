@@ -104,6 +104,11 @@ export default function App() {
     () => [...(features?.edits || []), ...manualEdits],
     [features, manualEdits]
   );
+  // 统一获取时长：优先 Draft，其次 Timeline，最后原始视频
+  const effectiveDuration = useMemo(() => {
+    return draft?.settings?.totalDuration || timeline?.totalTimelineDuration || duration;
+  }, [draft, timeline, duration]);
+
   const computedFilter = useMemo(() => {
     const parts = [];
     if (colorAdjust.brightness !== 0) parts.push(`brightness(${1 + colorAdjust.brightness})`);
@@ -391,7 +396,10 @@ export default function App() {
   const mediaToTimeline = (mTime) => {
     if (!timeline || !timeline.clips) return mTime;
     const clip = findClipByMediaTime(mTime);
-    if (!clip) return mTime;
+    if (!clip) {
+      // 如果不在任何 clip 中，返回 effectiveDuration（已播放完毕）
+      return effectiveDuration || mTime;
+    }
     const offsetInClip = mTime - clip.start;
     return clip.timelineStart + (offsetInClip / (clip.playbackRate || 1));
   };
@@ -498,6 +506,18 @@ export default function App() {
     if (isPlaying) {
       videoRef.current.pause();
     } else {
+      // 检查视频是否已播放到最后
+      if (playheadTime >= effectiveDuration - 0.1) {
+        // 回到开头
+        if (timeline && timeline.clips && timeline.clips.length > 0) {
+          videoRef.current.currentTime = timeline.clips[0].start;
+        } else {
+          videoRef.current.currentTime = 0;
+        }
+        setPlayheadTime(0);
+        playheadTimeRef.current = 0;
+      }
+
       if (timeline && timeline.clips) {
         const currentTime = videoRef.current.currentTime;
         const currentClip = findClipByMediaTime(currentTime);
@@ -513,15 +533,14 @@ export default function App() {
 
   const handleTimelineScrub = (e) => {
     if (!timelineRef.current || !videoRef.current) return;
-    const totalDuration = timeline?.totalTimelineDuration || duration;
-    if (!totalDuration) return;
+    if (!effectiveDuration) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const scrollLeft = timelineRef.current.scrollLeft;
     const x = e.clientX - rect.left + scrollLeft - 48;
     const totalWidth = rect.width * timelineScale - 48;
     const percentage = Math.max(0, Math.min(1, x / totalWidth));
 
-    const targetTimelineTime = percentage * totalDuration;
+    const targetTimelineTime = percentage * effectiveDuration;
     const targetMediaTime = timeline?.totalTimelineDuration ? timelineToMedia(targetTimelineTime) : targetTimelineTime;
 
     videoRef.current.currentTime = targetMediaTime;
@@ -1045,7 +1064,7 @@ export default function App() {
       if (!drag?.active || !timelineRef.current) return;
       const contRect = timelineRef.current.getBoundingClientRect();
       const totalPx = contRect.width * timelineScale;
-      const totalDur = timeline?.totalTimelineDuration || duration || 1;
+      const totalDur = effectiveDuration || 1;
       const pxPerSec = totalPx / totalDur;
       const deltaSec = (e.clientX - drag.startX) / pxPerSec;
       const { clip, edge } = drag;
@@ -1263,6 +1282,7 @@ export default function App() {
                 <select value={engine} onChange={(e) => setEngine(e.target.value)}>
                   <option value="auto">Auto</option>
                   <option value="gemini">Gemini</option>
+                  <option value="doubao">Doubao</option>
                 </select>
               </label>
               {prepareStatus === "preparing" && <span className="prepare-status preparing">⏳ 预上传中…</span>}
@@ -1397,7 +1417,7 @@ export default function App() {
             <button className="btn-play-pause" onClick={togglePlay} disabled={!videoUrl}>
               {isPlaying ? "⏸" : "▶️"}
             </button>
-            <span className="time-display">{formatTime(playheadTime)} / {formatTime(timeline?.totalTimelineDuration || duration)}</span>
+            <span className="time-display">{formatTime(playheadTime)} / {formatTime(effectiveDuration)}</span>
             <div className="preview-controls-right">
               <select
                 className="format-select"
@@ -1571,7 +1591,7 @@ export default function App() {
         >
           <div className="timeline-ruler" style={{ width: `${timelineScale * 100}%` }}>
             {(() => {
-              const totalDur = timeline?.totalTimelineDuration || duration || 1;
+              const totalDur = effectiveDuration || 1;
               // 根据缩放级别决定间隔粒度
               const approxPx = 800 * timelineScale;
               const rawInterval = totalDur / (approxPx / 80);
@@ -1593,7 +1613,7 @@ export default function App() {
           <div className="timeline-tracks" style={{ width: `${timelineScale * 100}%` }}>
             <div
               className="timeline-playhead-full"
-              style={{ left: `calc(48px + (100% - 48px) * ${playheadTime / (timeline?.totalTimelineDuration || duration || 1)})` }}
+              style={{ left: `calc(48px + (100% - 48px) * ${playheadTime / (effectiveDuration || 1)})` }}
             >
               <div className="playhead-handle" onMouseDown={handlePlayheadMouseDown} />
             </div>
@@ -1661,7 +1681,7 @@ export default function App() {
                 {features?.events?.map((ev, i) => {
                   const tStart = mediaToTimeline(ev.start);
                   const tEnd = mediaToTimeline(ev.end);
-                  const tDuration = timeline?.totalTimelineDuration || duration;
+                  const tDuration = effectiveDuration;
                   return (
                     <div 
                       key={i} 
