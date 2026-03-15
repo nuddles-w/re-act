@@ -1,0 +1,98 @@
+[19:12:41.252] [INFO] [analyze] start
+{
+  "name": "IMG_5962.MOV",
+  "size": 394329811,
+  "duration": 358.561667,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "找出视频中穿白色球衣的球员进球的片段，保留这些片段，其它都去掉\r\n",
+  "engine": "doubao"
+}
+[19:12:41.777] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-15T11:12:41.252Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "IMG_5962.MOV",
+      "size": 394329811,
+      "duration": 358.561667,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "找出视频中穿白色球衣的球员进球的片段，保留这些片段，其它都去掉\r\n",
+      "engine": "doubao"
+    }
+  },
+  {
+    "round": 1,
+    "error": "Error: Doubao API error: 404 "
+  },
+  {
+    "time": "2026-03-15T11:12:41.777Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-timeout",
+      "edits": 0
+    }
+  }
+]
+[19:12:41.777] [DATA] [analyze] result.features
+null
+[19:12:41.777] [INFO] [analyze] done
+{
+  "source": "agent-loop-timeout",
+  "events": 0,
+  "edits": 0
+}
+[19:13:16.066] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "dur": 32.002
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "timelineStart": 0,
+      "displayDuration": 32.002,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 32.002,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}
+[19:13:22.019] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "dur": 32.002
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "timelineStart": 0,
+      "displayDuration": 32.002,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 32.002,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}

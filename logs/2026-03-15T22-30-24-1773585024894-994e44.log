@@ -1,0 +1,152 @@
+[22:30:24.894] [INFO] [analyze] start
+{
+  "name": "IMG_5962_edited.mp4",
+  "size": 16664237,
+  "duration": 32.002,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "找出视频中穿白色球衣的球员进球的片段，保留这些片段，其它都去掉\r\n",
+  "engine": "doubao"
+}
+[22:31:11.362] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-15T14:30:24.894Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "IMG_5962_edited.mp4",
+      "size": 16664237,
+      "duration": 32.002,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "找出视频中穿白色球衣的球员进球的片段，保留这些片段，其它都去掉\r\n",
+      "engine": "doubao"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户需要筛选并保留视频中穿白色球衣球员进球的片段，删除其余内容，首先需要分析视频定位符合要求的片段时间范围",
+    "action": "analyze_video(\"穿白色球衣的球员进球的完整片段\")",
+    "observation": {
+      "events": 1,
+      "description": "视频呈现室内篮球场上两名男子进行单挑的场景，其中穿白色23号球衣的球员完成了一次抢断后的上篮得分。"
+    }
+  },
+  {
+    "round": 2,
+    "thought": "已定位到穿白色球衣球员的完整进球片段为21-25秒，符合「蓄力-高潮-反应」的完整性原则，保留该片段并删除其余所有内容即可满足用户需求"
+  },
+  {
+    "time": "2026-03-15T14:31:11.362Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-doubao",
+      "edits": 2
+    }
+  }
+]
+[22:31:11.363] [DATA] [analyze] result.features
+{
+  "duration": 32.002,
+  "segmentCount": 1,
+  "segments": [
+    {
+      "id": "21.00-25.00",
+      "start": 21,
+      "end": 25,
+      "duration": 4,
+      "energy": 0.9,
+      "label": "白色球衣球员抢断后突破上篮得分",
+      "tags": {}
+    }
+  ],
+  "keyframes": [
+    {
+      "time": 23,
+      "energy": 0.9
+    }
+  ],
+  "rhythmScore": 0.9,
+  "events": [
+    {
+      "label": "穿白色球衣的球员抢断后突破上篮完成进球",
+      "start": 21,
+      "end": 25,
+      "confidence": 1
+    }
+  ],
+  "edits": [
+    {
+      "type": "delete",
+      "start": 0,
+      "end": 21
+    },
+    {
+      "type": "delete",
+      "start": 25,
+      "end": 32.002
+    }
+  ],
+  "summary": "已为你筛选出穿白色球衣球员进球的完整片段，其余内容已全部删除，最终保留的片段时长为4秒",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户需要筛选并保留视频中穿白色球衣球员进球的片段，删除其余内容，首先需要分析视频定位符合要求的片段时间范围",
+      "action": "analyze_video(\"穿白色球衣的球员进球的完整片段\")",
+      "observation": {
+        "events": 1,
+        "description": "视频呈现室内篮球场上两名男子进行单挑的场景，其中穿白色23号球衣的球员完成了一次抢断后的上篮得分。"
+      }
+    },
+    {
+      "round": 2,
+      "thought": "已定位到穿白色球衣球员的完整进球片段为21-25秒，符合「蓄力-高潮-反应」的完整性原则，保留该片段并删除其余所有内容即可满足用户需求"
+    }
+  ],
+  "performance": {
+    "totalTime": "46.5s",
+    "rounds": 2,
+    "tokensIn": 24522,
+    "tokensOut": 1540,
+    "totalTokens": 26062,
+    "cost": "$0.0000",
+    "orchestratorCalls": 2,
+    "videoAnalysisCalls": 1
+  }
+}
+[22:31:11.363] [INFO] [analyze] done
+{
+  "source": "agent-loop-doubao",
+  "segmentCount": 1,
+  "events": 1,
+  "edits": 2
+}
+[22:31:11.364] [DATA] [analyze] rawResponse
+"{\n    \"thought\": \"已定位到穿白色球衣球员的完整进球片段为21-25秒，符合「蓄力-高潮-反应」的完整性原则，保留该片段并删除其余所有内容即可满足用户需求\",\n    \"final_answer\": \"已为你筛选出穿白色球衣球员进球的完整片段，其余内容已全部删除，最终保留的片段时长为4秒\",\n    \"summary\": \"视频呈现室内篮球场上两名男子进行单挑的场景，其中穿白色23号球衣的球员完成了一次抢断后的上篮得分\",\n    \"segments\": [\n        { \"start\": 21.0, \"end\": 25.0, \"energy\": 0.9, \"label\": \"白色球衣球员抢断后突破上篮得分\" }\n    ],\n    \"events\": [\n        { \"label\": \"穿白色球衣的球员抢断后突破上篮完成进球\", \"start\": 21.0, \"end\": 25.0, \"confidence\": 1.0 }\n    ],\n    \"edits\": [\n        { \"type\": \"delete\", \"start\": 0.0, \"end\": 21.0 },\n        { \"type\": \"delete\", \"start\": 25.0, \"end\": 32.002 }\n    ]\n}"
+[22:31:11.388] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "21.00-25.00",
+      "start": 21,
+      "end": 25,
+      "dur": 4
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "21.00-25.00",
+      "start": 21,
+      "end": 25,
+      "timelineStart": 0,
+      "displayDuration": 4,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 4,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}

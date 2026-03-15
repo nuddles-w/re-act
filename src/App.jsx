@@ -12,6 +12,7 @@ const formatTime = (value) => {
 
 export default function App() {
   const videoRef = useRef(null);
+  const audioRef = useRef(null); // 新增：音频播放器引用
   const endTimeRef = useRef(null);
   const chatEndRef = useRef(null);
   const [file, setFile] = useState(null);
@@ -21,6 +22,7 @@ export default function App() {
   const [intent, setIntent] = useState(defaultIntent);
   const [timeline, setTimeline] = useState(null);
   const [draft, setDraft] = useState(null); // 新增：Draft 状态
+  const [bgmUrl, setBgmUrl] = useState(null); // 新增：BGM 文件 URL
   const [activeClipId, setActiveClipId] = useState(null);
   const [analysisStatus, setAnalysisStatus] = useState("idle");
   const [analysisSource, setAnalysisSource] = useState("local");
@@ -211,6 +213,55 @@ export default function App() {
     }
   }, [sessionId, apiBase]);
 
+  // 处理 Draft 中的 BGM
+  useEffect(() => {
+    console.log('[BGM useEffect] Draft changed:', draft);
+
+    if (!draft) {
+      console.log('[BGM] No draft');
+      setBgmUrl(null);
+      return;
+    }
+
+    // 查找音频轨道
+    const audioTrack = draft.tracks?.find(t => t.type === 'audio');
+    console.log('[BGM] Audio track:', audioTrack);
+
+    if (!audioTrack || !audioTrack.segments || audioTrack.segments.length === 0) {
+      console.log('[BGM] No audio track or segments');
+      setBgmUrl(null);
+      return;
+    }
+
+    // 获取第一个音频片段的文件路径
+    const audioSegment = audioTrack.segments[0];
+    console.log('[BGM] Audio segment:', audioSegment);
+
+    if (audioSegment.sourceFile) {
+      // 构建 API URL 来获取音频文件
+      const bgmApiUrl = `${apiBase}/api/audio/${encodeURIComponent(audioSegment.sourceFile)}`;
+      setBgmUrl(bgmApiUrl);
+      console.log('[BGM] Loading audio from:', bgmApiUrl);
+
+      // 设置音量
+      if (audioRef.current) {
+        audioRef.current.volume = audioSegment.volume || 0.3;
+        console.log('[BGM] Set volume to:', audioRef.current.volume);
+      }
+    } else {
+      console.log('[BGM] No sourceFile in segment');
+      setBgmUrl(null);
+    }
+  }, [draft, apiBase]);
+
+  // 页面加载时，如果有 sessionId，自动获取 Draft
+  useEffect(() => {
+    if (sessionId && !draft) {
+      console.log('[App] Auto-fetching draft for session:', sessionId);
+      fetchDraft(sessionId);
+    }
+  }, [sessionId, draft, fetchDraft]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
@@ -388,6 +439,13 @@ export default function App() {
     videoRef.current.playbackRate = clip.playbackRate || 1;
     videoRef.current.volume = clip.volume ?? 1;
     videoRef.current.play();
+
+    // 同步播放 BGM
+    if (audioRef.current && bgmUrl) {
+      audioRef.current.currentTime = clip.timelineStart || 0;
+      audioRef.current.play().catch(err => console.warn('[BGM] Play failed:', err));
+    }
+
     playheadTimeRef.current = clip.start;
     setPlayheadTime(clip.start);
   };
@@ -458,6 +516,7 @@ export default function App() {
           } else {
             // 已过最后一个 clip — 停止
             videoRef.current.pause();
+            if (audioRef.current) audioRef.current.pause();
             setIsPlaying(false);
           }
         }
@@ -466,6 +525,7 @@ export default function App() {
 
     if (endTimeRef.current != null && currentTime >= endTimeRef.current - 0.05) {
       videoRef.current.pause();
+      if (audioRef.current) audioRef.current.pause();
       setIsPlaying(false);
       videoRef.current.playbackRate = 1;
       videoRef.current.volume = 1;
@@ -505,6 +565,8 @@ export default function App() {
     if (!videoRef.current) return;
     if (isPlaying) {
       videoRef.current.pause();
+      // 同步暂停 BGM
+      if (audioRef.current) audioRef.current.pause();
     } else {
       // 检查视频是否已播放到最后
       if (playheadTime >= effectiveDuration - 0.1) {
@@ -516,6 +578,11 @@ export default function App() {
         }
         setPlayheadTime(0);
         playheadTimeRef.current = 0;
+
+        // 同步 BGM 到开头
+        if (audioRef.current && bgmUrl) {
+          audioRef.current.currentTime = 0;
+        }
       }
 
       if (timeline && timeline.clips) {
@@ -527,6 +594,13 @@ export default function App() {
         }
       }
       videoRef.current.play();
+
+      // 同步播放 BGM
+      if (audioRef.current && bgmUrl) {
+        const timelineTime = mediaToTimeline(videoRef.current.currentTime);
+        audioRef.current.currentTime = timelineTime;
+        audioRef.current.play().catch(err => console.warn('[BGM] Play failed:', err));
+      }
     }
     setIsPlaying(!isPlaying);
   };
@@ -544,6 +618,12 @@ export default function App() {
     const targetMediaTime = timeline?.totalTimelineDuration ? timelineToMedia(targetTimelineTime) : targetTimelineTime;
 
     videoRef.current.currentTime = targetMediaTime;
+
+    // 同步 BGM 时间
+    if (audioRef.current && bgmUrl) {
+      audioRef.current.currentTime = targetTimelineTime;
+    }
+
     playheadTimeRef.current = targetTimelineTime;
     setPlayheadTime(targetTimelineTime);
 
@@ -1352,6 +1432,15 @@ export default function App() {
                     filter: computedFilter,
                   }}
                 />
+                {/* BGM 音频播放器 */}
+                {bgmUrl && (
+                  <audio
+                    ref={audioRef}
+                    src={bgmUrl}
+                    loop
+                    style={{ display: 'none' }}
+                  />
+                )}
                 {videoRef.current && videoRef.current.playbackRate !== 1 && (
                   <div className="playback-speed-overlay">
                     {videoRef.current.playbackRate}x

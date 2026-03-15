@@ -378,7 +378,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         fps: 30,
       };
 
-      const draft = aiOutputToDraft(result.features, videoSource, newSessionId);
+      const draft = await aiOutputToDraft(result.features, videoSource, newSessionId);
 
       // 更新 draft 到 DraftManager
       draftManager.updateDraft(newSessionId, {
@@ -483,6 +483,22 @@ app.post("/api/log", express.json(), (req, res) => {
   if (!targetId) return res.status(404).json({ ok: false, error: "no active logger" });
   const ok = appendToLog(targetId, context || "frontend", message || "data", data);
   res.json({ ok });
+});
+
+// ── 提供音频文件 ──
+app.get("/api/audio/:filePath", (req, res) => {
+  const filePath = decodeURIComponent(req.params.filePath);
+
+  // 安全检查：只允许访问临时目录中的文件
+  if (!filePath.startsWith(os.tmpdir())) {
+    return res.status(403).json({ error: "Access denied" });
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "Audio file not found" });
+  }
+
+  res.sendFile(filePath);
 });
 
 app.post("/api/export", upload.single("video"), async (req, res) => {

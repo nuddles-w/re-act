@@ -10,8 +10,11 @@
  * analyze_video 是唯一需要视频的工具：
  *   - 触发时先等待压缩完成，再上传，再调用 analyzeVideoContent
  *   - 已上传过则复用 fileUri（缓存）
+ *
+ * 支持引擎：Gemini 和 Doubao
  */
 import { prepareGeminiUpload, analyzeVideoContent, runOrchestratorTurn } from "./geminiProvider.js";
+import { prepareDoubaoUpload, analyzeDoubaoVideoContent, runDoubaoOrchestratorTurn } from "./doubaoSeedProvider.js";
 import { parseFeatures } from "../utils/parseFeatures.js";
 import { formatHistoryForPrompt } from "../utils/buildEditContext.js";
 import { getDraftManager } from "../draftManager.js";
@@ -75,6 +78,7 @@ function buildInitialMessage({ request, duration, conversationHistory, conversat
 /**
  * 主入口
  * @param {object} opts
+ * @param {string}  opts.engine             - 引擎类型：'gemini' 或 'doubao'
  * @param {string}  opts.sessionId          - 会话 ID
  * @param {object}  opts.video              - { name, size, mimeType, buffer?, path?, duration }
  * @param {string}  opts.cachedFileUri      - 已上传视频的 fileUri（会话复用）
@@ -87,6 +91,7 @@ function buildInitialMessage({ request, duration, conversationHistory, conversat
  * @param {Function} opts.onProgress
  */
 export async function runAgentLoop({
+  engine = "gemini",
   sessionId,
   video,
   cachedFileUri,
@@ -98,7 +103,12 @@ export async function runAgentLoop({
   editContext,
   onProgress,
 }) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const isDoubao = engine === "doubao";
+  const apiKey = isDoubao
+    ? (process.env.DOUBAO_API_KEY || process.env.ARK_API_KEY || process.env.VOLC_ARK_API_KEY)
+    : process.env.GEMINI_API_KEY;
+
+  const engineName = isDoubao ? "Doubao" : "Gemini";
   const debugTimeline = [];
   const startTime = Date.now();
 
@@ -111,9 +121,13 @@ export async function runAgentLoop({
     videoAnalysisCalls: 0,
   };
 
-  // 已上传的视频文件（analyze_video tool 调用时填充）
+  // 已上传的视频文件
+  // Gemini: { fileUri, mimeType }
+  // Doubao: { fileId, mimeType, fps }
   let uploadedFile = cachedFileUri
-    ? { fileUri: cachedFileUri, mimeType: cachedMimeType || "video/mp4" }
+    ? (isDoubao
+        ? { fileId: cachedFileUri, mimeType: cachedMimeType || "video/mp4", fps: 10 }
+        : { fileUri: cachedFileUri, mimeType: cachedMimeType || "video/mp4" })
     : null;
 
   // 多轮对话消息列表
@@ -130,7 +144,9 @@ export async function runAgentLoop({
 
     let responseText, usage;
     try {
-      const result = await runOrchestratorTurn({ messages });
+      const result = isDoubao
+        ? await runDoubaoOrchestratorTurn({ messages })
+        : await runOrchestratorTurn({ messages });
       responseText = result.text;
       usage = result.usage;
 
@@ -148,7 +164,8 @@ export async function runAgentLoop({
     }
 
     lastResponseText = responseText;
-    messages.push({ role: "model", content: responseText });
+    // Gemini uses "model", Doubao uses "assistant"
+    messages.push({ role: isDoubao ? "assistant" : "model", content: responseText });
 
     let parsed = {};
     try { parsed = JSON.parse(responseText); } catch (_) {}
@@ -174,10 +191,10 @@ export async function runAgentLoop({
         videoAnalysisCalls: stats.videoAnalysisCalls,
       };
 
-      console.log(`[agentLoop] ✅ 完成 | 耗时=${performanceSummary.totalTime} 轮数=${performanceSummary.rounds} tokens=${performanceSummary.totalTokens} 成本=${performanceSummary.cost}`);
+      console.log(`[agentLoop] ✅ 完成 | 引擎=${engineName} 耗时=${performanceSummary.totalTime} 轮数=${performanceSummary.rounds} tokens=${performanceSummary.totalTokens} 成本=${performanceSummary.cost}`);
 
       return {
-        source: "agent-loop",
+        source: `agent-loop-${engine}`,
         features: {
           ...features,
           summary: parsed.final_answer,
@@ -186,7 +203,7 @@ export async function runAgentLoop({
         },
         rawResponse: responseText,
         debugTimeline,
-        uploadedFileUri: uploadedFile?.fileUri ?? null,
+        uploadedFileUri: isDoubao ? uploadedFile?.fileId : uploadedFile?.fileUri,
         uploadedFileMimeType: uploadedFile?.mimeType ?? null,
       };
     }
@@ -213,18 +230,27 @@ export async function runAgentLoop({
         if (!video) {
           observation = { error: "no video file available" };
         } else {
-          onProgress?.("⬆️ 上传视频到 Gemini...");
-          uploadedFile = await prepareGeminiUpload(video, apiKey, onProgress);
+          onProgress?.(`⬆️ 上传视频到 ${engineName}...`);
+          uploadedFile = isDoubao
+            ? await prepareDoubaoUpload(video, apiKey, onProgress)
+            : await prepareGeminiUpload(video, apiKey, onProgress);
         }
       }
 
     if (uploadedFile) {
-        const analysis = await analyzeVideoContent({
-          fileUri: uploadedFile.fileUri,
-          mimeType: uploadedFile.mimeType,
-          query,
-          duration,
-        });
+        const analysis = isDoubao
+          ? await analyzeDoubaoVideoContent({
+              fileId: uploadedFile.fileId,
+              fps: uploadedFile.fps,
+              query,
+              duration,
+            })
+          : await analyzeVideoContent({
+              fileUri: uploadedFile.fileUri,
+              mimeType: uploadedFile.mimeType,
+              query,
+              duration,
+            });
         observation = analysis;
         logEntry.observation = { events: analysis.events?.length, description: analysis.description?.slice(0, 80) };
         console.log(`[agentLoop] analyze_video → ${analysis.events?.length ?? 0} events`);

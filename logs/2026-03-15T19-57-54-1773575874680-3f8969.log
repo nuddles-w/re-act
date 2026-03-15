@@ -1,0 +1,109 @@
+[19:57:54.681] [INFO] [analyze] start
+{
+  "name": "IMG_5962_edited.mp4",
+  "size": 16664237,
+  "duration": 32.002,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "找出视频中穿白色球衣的球员进球的片段，保留这些片段，其它都去掉\r\n",
+  "engine": "doubao"
+}
+[19:58:03.445] [ERROR] [analyze] error
+{
+  "message": "Error: Doubao file upload error: 400 {\"error\":{\"code\":\"InvalidParameter\",\"message\":\"Purpose must be user_data. Request id: 0217735758834728edd2369ecdae8f7c496a12d84e74b775ec741\",\"param\":\"purpose\",\"type\":\"BadRequest\"}}",
+  "stack": "Error: Doubao file upload error: 400 {\"error\":{\"code\":\"InvalidParameter\",\"message\":\"Purpose must be user_data. Request id: 0217735758834728edd2369ecdae8f7c496a12d84e74b775ec741\",\"param\":\"purpose\",\"type\":\"BadRequest\"}}\n    at prepareDoubaoUpload (file:///Users/bytedance/re-act/server/providers/doubaoSeedProvider.js:265:13)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async runAgentLoop (file:///Users/bytedance/re-act/server/providers/agentLoop.js:234:15)\n    at async file:///Users/bytedance/re-act/server/index.js:321:16"
+}
+[19:58:03.456] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "0.00-5.33",
+      "start": 0,
+      "end": 5.333666666666667,
+      "dur": 5.333666666666667
+    },
+    {
+      "id": "5.33-10.67",
+      "start": 5.333666666666667,
+      "end": 10.667333333333334,
+      "dur": 5.333666666666667
+    },
+    {
+      "id": "10.67-16.00",
+      "start": 10.667333333333334,
+      "end": 16.001,
+      "dur": 5.333666666666668
+    },
+    {
+      "id": "16.00-21.33",
+      "start": 16.001,
+      "end": 21.334666666666667,
+      "dur": 5.333666666666666
+    },
+    {
+      "id": "21.33-26.67",
+      "start": 21.334666666666667,
+      "end": 26.668333333333333,
+      "dur": 5.333666666666666
+    },
+    {
+      "id": "26.67-32.00",
+      "start": 26.668333333333333,
+      "end": 32.002,
+      "dur": 5.333666666666669
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "0.00-5.33",
+      "start": 0,
+      "end": 5.333666666666667,
+      "timelineStart": 0,
+      "displayDuration": 5.333666666666667,
+      "playbackRate": 1
+    },
+    {
+      "id": "5.33-10.67",
+      "start": 5.333666666666667,
+      "end": 10.667333333333334,
+      "timelineStart": 5.333666666666667,
+      "displayDuration": 5.333666666666667,
+      "playbackRate": 1
+    },
+    {
+      "id": "10.67-16.00",
+      "start": 10.667333333333334,
+      "end": 16.001,
+      "timelineStart": 10.667333333333334,
+      "displayDuration": 5.333666666666668,
+      "playbackRate": 1
+    },
+    {
+      "id": "16.00-21.33",
+      "start": 16.001,
+      "end": 21.334666666666667,
+      "timelineStart": 16.001,
+      "displayDuration": 5.333666666666666,
+      "playbackRate": 1
+    },
+    {
+      "id": "21.33-26.67",
+      "start": 21.334666666666667,
+      "end": 26.668333333333333,
+      "timelineStart": 21.334666666666667,
+      "displayDuration": 5.333666666666666,
+      "playbackRate": 1
+    },
+    {
+      "id": "26.67-32.00",
+      "start": 26.668333333333333,
+      "end": 32.002,
+      "timelineStart": 26.668333333333333,
+      "displayDuration": 5.333666666666669,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 32.002,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}

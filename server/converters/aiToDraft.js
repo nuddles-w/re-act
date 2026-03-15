@@ -15,15 +15,16 @@ import {
   updateDraftDuration,
   TrackType,
 } from "../../src/domain/draftModel.js";
+import { searchAndDownloadBgm } from "../utils/fetchBgm.js";
 
 /**
  * 将 AI 输出转换为 Draft
  * @param {object} aiOutput - { segments, events, edits, summary }
  * @param {object} videoSource - { name, path, duration, width, height, fps }
  * @param {string} sessionId
- * @returns {object} draft
+ * @returns {Promise<object>} draft
  */
-export function aiOutputToDraft(aiOutput, videoSource, sessionId) {
+export async function aiOutputToDraft(aiOutput, videoSource, sessionId) {
   const draft = createEmptyDraft();
 
   // 添加视频源
@@ -51,7 +52,7 @@ export function aiOutputToDraft(aiOutput, videoSource, sessionId) {
 
   // 转换 edits（各种编辑操作）
   if (aiOutput.edits && aiOutput.edits.length > 0) {
-    convertEditsToDraft(aiOutput.edits, draft, videoTrack);
+    await convertEditsToDraft(aiOutput.edits, draft, videoTrack, sessionId);
   }
 
   // 更新总时长
@@ -91,12 +92,56 @@ function convertSegmentsToDraft(segments, videoTrack, sourceId, totalDuration) {
 /**
  * 转换 edits 到对应的轨道
  */
-function convertEditsToDraft(edits, draft, videoTrack) {
+async function convertEditsToDraft(edits, draft, videoTrack, sessionId) {
   const textEdits = edits.filter(e => e.type === "text");
   const fadeEdits = edits.filter(e => e.type === "fade");
   const speedEdits = edits.filter(e => e.type === "speed");
   const deleteEdits = edits.filter(e => e.type === "delete");
   const bgmEdits = edits.filter(e => e.type === "bgm");
+
+  // 处理背景音乐（放在最前面，让音频轨道显示在上方）
+  if (bgmEdits.length > 0) {
+    const audioTrack = createTrack(TrackType.AUDIO, "A1");
+    draft.tracks.push(audioTrack);
+
+    // 计算剪辑后的总时长（所有视频片段的 timeline 时长之和）
+    const totalTimelineDuration = videoTrack.segments.reduce((sum, seg) => sum + seg.timelineDuration, 0);
+
+    // 立即下载 BGM
+    for (const edit of bgmEdits) {
+      try {
+        console.log(`[aiToDraft] Downloading BGM with keywords: "${edit.keywords}"`);
+        const bgm = await searchAndDownloadBgm(edit.keywords, sessionId || `bgm-${Date.now()}`);
+        console.log(`[aiToDraft] BGM downloaded: ${bgm.title} - ${bgm.artist} (${bgm.path})`);
+
+        audioTrack.segments.push({
+          id: `seg-a-bgm-${Date.now()}`,
+          type: "audio",
+          sourceFile: bgm.path, // 保存下载的文件路径
+          timelineStart: 0,
+          timelineDuration: totalTimelineDuration,
+          volume: edit.volume || 0.3,
+          metadata: {
+            title: bgm.title,
+            artist: bgm.artist,
+            keywords: edit.keywords,
+          },
+        });
+      } catch (error) {
+        console.error(`[aiToDraft] Failed to download BGM: ${error.message}`);
+        // BGM 下载失败不阻断流程，只记录占位符
+        audioTrack.segments.push({
+          id: `seg-a-bgm-${Date.now()}`,
+          type: "bgm",
+          keywords: edit.keywords,
+          volume: edit.volume || 0.3,
+          timelineStart: 0,
+          timelineDuration: totalTimelineDuration,
+          error: error.message,
+        });
+      }
+    }
+  }
 
   // 处理文字编辑
   if (textEdits.length > 0) {
@@ -145,24 +190,6 @@ function convertEditsToDraft(edits, draft, videoTrack) {
   deleteEdits.forEach(edit => {
     applyDeleteEditToSegments(videoTrack, edit);
   });
-
-  // 处理背景音乐
-  if (bgmEdits.length > 0) {
-    const audioTrack = createTrack(TrackType.AUDIO, "A1");
-    draft.tracks.push(audioTrack);
-
-    // BGM 暂时只记录关键词，实际音频在导出时下载
-    bgmEdits.forEach(edit => {
-      audioTrack.segments.push({
-        id: `seg-a-bgm-${Date.now()}`,
-        type: "bgm",
-        keywords: edit.keywords,
-        volume: edit.volume || 0.3,
-        timelineStart: 0,
-        timelineDuration: 0, // 导出时根据视频总时长确定
-      });
-    });
-  }
 }
 
 /**

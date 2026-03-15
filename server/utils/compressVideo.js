@@ -18,11 +18,19 @@ export function compressVideoForUpload(inputPath, outputPath, options = {}) {
   const fps = options.fps || 2;
   const audioBitrate = options.audioBitrate || "64k";
 
+  console.log(`[compressVideo] Starting compression:`);
+  console.log(`  Input: ${inputPath}`);
+  console.log(`  Output: ${outputPath}`);
+  console.log(`  Resolution: ${maxWidth}x${maxHeight}`);
+  console.log(`  FPS: ${fps}`);
+  console.log(`  Audio bitrate: ${audioBitrate}`);
+  console.log(`  Input size: ${(inputSize / 1024 / 1024).toFixed(2)} MB`);
+
   return new Promise((resolve, reject) => {
     const args = [
       "-y",
       "-i", inputPath,
-      "-vf", `scale=${maxWidth}:${maxHeight}:force_original_aspect_ratio=decrease`,
+      "-vf", `scale='min(${maxWidth},iw)':'min(${maxHeight},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`,
       "-r", String(fps),
       "-c:v", "h264",
       "-pix_fmt", "yuv420p",
@@ -34,15 +42,24 @@ export function compressVideoForUpload(inputPath, outputPath, options = {}) {
       outputPath,
     ];
 
+    console.log(`[compressVideo] FFmpeg command: ffmpeg ${args.join(' ')}`);
+
     const proc = spawn("ffmpeg", args);
-    proc.stderr.on("data", () => {}); // suppress ffmpeg stderr
+    let stderrOutput = '';
+    proc.stderr.on("data", (data) => {
+      stderrOutput += data.toString();
+    });
 
     proc.on("close", (code) => {
       if (code !== 0) {
+        console.error(`[compressVideo] FFmpeg failed with code ${code}`);
+        console.error(`[compressVideo] stderr:`, stderrOutput);
         reject(new Error(`FFmpeg compress exited with code ${code}`));
         return;
       }
       const outputSize = fs.existsSync(outputPath) ? fs.statSync(outputPath).size : 0;
+      const ratio = ((1 - outputSize / inputSize) * 100).toFixed(0);
+      console.log(`[compressVideo] Success: ${(outputSize / 1024 / 1024).toFixed(2)} MB (-${ratio}%), took ${Date.now() - t0}ms`);
       resolve({ inputSize, outputSize, durationMs: Date.now() - t0 });
     });
   });

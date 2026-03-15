@@ -1,0 +1,128 @@
+[22:31:53.191] [INFO] [analyze] 使用会话缓存 sess-1773585071363-xkochqk
+[22:31:53.192] [INFO] [analyze] start
+{
+  "duration": 32.002,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "再添加一个合适的背景音乐 ",
+  "engine": "doubao"
+}
+[22:32:13.809] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-15T14:31:53.192Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "duration": 32.002,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "再添加一个合适的背景音乐 ",
+      "engine": "doubao"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户需要为当前4秒的篮球进球片段添加合适的背景音乐，选择热血动感的篮球相关BGM，音量设置为0.3兼顾现场进球氛围和音乐效果"
+  },
+  {
+    "time": "2026-03-15T14:32:13.809Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-doubao",
+      "edits": 1
+    }
+  }
+]
+[22:32:13.809] [DATA] [analyze] result.features
+{
+  "duration": 32.002,
+  "segmentCount": 1,
+  "segments": [
+    {
+      "id": "21.00-25.00",
+      "start": 21,
+      "end": 25,
+      "duration": 4,
+      "energy": 0.9,
+      "label": "白色球衣球员抢断突破上篮得分",
+      "tags": {}
+    }
+  ],
+  "keyframes": [
+    {
+      "time": 23,
+      "energy": 0.9
+    }
+  ],
+  "rhythmScore": 0.9,
+  "events": [
+    {
+      "label": "白色球衣球员进球",
+      "start": 21,
+      "end": 25,
+      "confidence": 0.95
+    }
+  ],
+  "edits": [
+    {
+      "type": "bgm",
+      "start": 0,
+      "end": 32.002,
+      "keywords": "篮球进球 热血动感 短BGM",
+      "volume": 0.3
+    }
+  ],
+  "summary": "已为你添加适配篮球进球场景的热血动感BGM，音量调整到合适大小，既保留了现场进球的氛围音，又增强了画面感染力",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户需要为当前4秒的篮球进球片段添加合适的背景音乐，选择热血动感的篮球相关BGM，音量设置为0.3兼顾现场进球氛围和音乐效果"
+    }
+  ],
+  "performance": {
+    "totalTime": "20.6s",
+    "rounds": 1,
+    "tokensIn": 3570,
+    "tokensOut": 805,
+    "totalTokens": 4375,
+    "cost": "$0.0000",
+    "orchestratorCalls": 1,
+    "videoAnalysisCalls": 0
+  }
+}
+[22:32:13.810] [INFO] [analyze] done
+{
+  "source": "agent-loop-doubao",
+  "segmentCount": 1,
+  "events": 1,
+  "edits": 1
+}
+[22:32:13.812] [DATA] [analyze] rawResponse
+"{\n    \"thought\": \"用户需要为当前4秒的篮球进球片段添加合适的背景音乐，选择热血动感的篮球相关BGM，音量设置为0.3兼顾现场进球氛围和音乐效果\",\n    \"final_answer\": \"已为你添加适配篮球进球场景的热血动感BGM，音量调整到合适大小，既保留了现场进球的氛围音，又增强了画面感染力\",\n    \"summary\": \"穿白色球衣球员抢断后突破上篮得分的完整进球片段\",\n    \"segments\": [\n        { \"start\": 21.0, \"end\": 25.0, \"energy\": 0.9, \"label\": \"白色球衣球员抢断突破上篮得分\" }\n    ],\n    \"events\": [\n        { \"label\": \"白色球衣球员进球\", \"start\": 21.0, \"end\": 25.0, \"confidence\": 0.95 }\n    ],\n    \"edits\": [\n        { \"type\": \"bgm\", \"keywords\": \"篮球进球 热血动感 短BGM\", \"volume\": 0.3 }\n    ]\n}"
+[22:32:13.828] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "21.00-25.00",
+      "start": 21,
+      "end": 25,
+      "dur": 4
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "21.00-25.00",
+      "start": 21,
+      "end": 25,
+      "timelineStart": 0,
+      "displayDuration": 4,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 4,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}

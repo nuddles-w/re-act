@@ -1,0 +1,59 @@
+[20:12:54.471] [INFO] [analyze] start
+{
+  "name": "IMG_5962_edited.mp4",
+  "size": 16664237,
+  "duration": 32.002,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "找出视频中穿白色球衣的球员进球的片段，保留这些片段，其它都去掉\r\n",
+  "engine": "doubao"
+}
+[20:13:18.944] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-15T12:12:54.471Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "IMG_5962_edited.mp4",
+      "size": 16664237,
+      "duration": 32.002,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "找出视频中穿白色球衣的球员进球的片段，保留这些片段，其它都去掉\r\n",
+      "engine": "doubao"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户需要提取视频中穿白色球衣球员进球的片段并删除其他内容，当前无视频内容信息，需先调用视频分析工具定位符合要求的事件节点。",
+    "action": "analyze_video(\"穿白色球衣的球员进球的片段\")",
+    "observation": {
+      "events": 0,
+      "description": ""
+    }
+  },
+  {
+    "round": 2,
+    "error": "Error: Doubao API error: 400 {\"error\":{\"code\":\"InvalidParameter\",\"message\":\"The parameter `messages.role` specified in the request are not valid: invalid value: `model`, supported values are: `system`, `assistant`, `user`, `tool`. Request id: 0217735767990251d3a1d4bbb7934834cc5dea1149c19ea9eb24e\",\"param\":\"\",\"type\":\"BadRequest\"}}"
+  },
+  {
+    "time": "2026-03-15T12:13:18.944Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-timeout",
+      "edits": 0
+    }
+  }
+]
+[20:13:18.944] [DATA] [analyze] result.features
+null
+[20:13:18.944] [INFO] [analyze] done
+{
+  "source": "agent-loop-timeout",
+  "events": 0,
+  "edits": 0
+}
+[20:13:18.945] [DATA] [analyze] rawResponse
+"{\n    \"thought\": \"用户需要提取视频中穿白色球衣球员进球的片段并删除其他内容，当前无视频内容信息，需先调用视频分析工具定位符合要求的事件节点。\",\n    \"action\": \"analyze_video(\\\"穿白色球衣的球员进球的片段\\\")\"\n}"

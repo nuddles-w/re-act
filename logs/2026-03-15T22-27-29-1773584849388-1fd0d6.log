@@ -1,0 +1,302 @@
+[22:27:29.391] [INFO] [analyze] 使用会话缓存 sess-1773584518367-p815u3z
+[22:27:29.391] [INFO] [analyze] start
+{
+  "duration": 358.561667,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "添加一个很燃的适合篮球的背景音乐 ",
+  "engine": "doubao"
+}
+[22:27:54.533] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-15T14:27:29.391Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "duration": 358.561667,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "添加一个很燃的适合篮球的背景音乐 ",
+      "engine": "doubao"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户需要为已制作完成的56秒篮球进球集锦添加燃向适配背景音乐，选择热血动感的篮球主题嘻哈BGM，音量设置为0.3，既能烘托氛围也保留原进球现场音效的辨识度"
+  },
+  {
+    "time": "2026-03-15T14:27:54.533Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-doubao",
+      "edits": 1
+    }
+  }
+]
+[22:27:54.534] [DATA] [analyze] result.features
+{
+  "duration": 358.561667,
+  "segmentCount": 10,
+  "segments": [
+    {
+      "id": "0.00-13.00",
+      "start": 0,
+      "end": 13,
+      "duration": 13,
+      "energy": 0.9,
+      "label": "持球突破防守后跳投命中",
+      "tags": {}
+    },
+    {
+      "id": "13.00-17.00",
+      "start": 13,
+      "end": 17,
+      "duration": 4,
+      "energy": 0.85,
+      "label": "运球后后撤步三分出手命中",
+      "tags": {}
+    },
+    {
+      "id": "17.00-20.00",
+      "start": 17,
+      "end": 20,
+      "duration": 3,
+      "energy": 0.9,
+      "label": "超远三分投篮命中",
+      "tags": {}
+    },
+    {
+      "id": "20.00-22.50",
+      "start": 20,
+      "end": 22.5,
+      "duration": 2.5,
+      "energy": 0.8,
+      "label": "抢断后突破上篮命中",
+      "tags": {}
+    },
+    {
+      "id": "22.50-25.50",
+      "start": 22.5,
+      "end": 25.5,
+      "duration": 3,
+      "energy": 0.85,
+      "label": "接球后三分出手命中",
+      "tags": {}
+    },
+    {
+      "id": "25.50-28.50",
+      "start": 25.5,
+      "end": 28.5,
+      "duration": 3,
+      "energy": 0.8,
+      "label": "后撤步三分出手命中",
+      "tags": {}
+    },
+    {
+      "id": "28.50-32.00",
+      "start": 28.5,
+      "end": 32,
+      "duration": 3.5,
+      "energy": 0.85,
+      "label": "运球后后撤步三分出手命中",
+      "tags": {}
+    },
+    {
+      "id": "32.00-34.50",
+      "start": 32,
+      "end": 34.5,
+      "duration": 2.5,
+      "energy": 0.8,
+      "label": "抢断后突破上篮命中",
+      "tags": {}
+    },
+    {
+      "id": "34.50-37.50",
+      "start": 34.5,
+      "end": 37.5,
+      "duration": 3,
+      "energy": 0.8,
+      "label": "突破防守后上篮命中",
+      "tags": {}
+    },
+    {
+      "id": "37.50-56.00",
+      "start": 37.5,
+      "end": 56,
+      "duration": 18.5,
+      "energy": 0.95,
+      "label": "超远三分出手命中完成绝杀",
+      "tags": {}
+    }
+  ],
+  "keyframes": [
+    {
+      "time": 6.5,
+      "energy": 0.9
+    },
+    {
+      "time": 15,
+      "energy": 0.85
+    },
+    {
+      "time": 18.5,
+      "energy": 0.9
+    },
+    {
+      "time": 21.25,
+      "energy": 0.8
+    },
+    {
+      "time": 24,
+      "energy": 0.85
+    },
+    {
+      "time": 27,
+      "energy": 0.8
+    },
+    {
+      "time": 30.25,
+      "energy": 0.85
+    },
+    {
+      "time": 33.25,
+      "energy": 0.8
+    },
+    {
+      "time": 36,
+      "energy": 0.8
+    },
+    {
+      "time": 46.75,
+      "energy": 0.95
+    }
+  ],
+  "rhythmScore": 0.85,
+  "events": [],
+  "edits": [
+    {
+      "type": "bgm",
+      "start": 0,
+      "end": 358.561667,
+      "keywords": "energetic hype basketball hip hop",
+      "volume": 0.3
+    }
+  ],
+  "summary": "已为您的篮球进球集锦添加了热血燃向的篮球主题背景音乐，BGM音量设置为0.3，既可以烘托紧张热血的比赛氛围，也不会掩盖原视频里进球的现场音效哦",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户需要为已制作完成的56秒篮球进球集锦添加燃向适配背景音乐，选择热血动感的篮球主题嘻哈BGM，音量设置为0.3，既能烘托氛围也保留原进球现场音效的辨识度"
+    }
+  ],
+  "performance": {
+    "totalTime": "25.1s",
+    "rounds": 1,
+    "tokensIn": 3870,
+    "tokensOut": 1221,
+    "totalTokens": 5091,
+    "cost": "$0.0000",
+    "orchestratorCalls": 1,
+    "videoAnalysisCalls": 0
+  }
+}
+[22:27:54.534] [INFO] [analyze] done
+{
+  "source": "agent-loop-doubao",
+  "segmentCount": 10,
+  "events": 0,
+  "edits": 1
+}
+[22:27:54.537] [DATA] [analyze] rawResponse
+"{\n  \"thought\": \"用户需要为已制作完成的56秒篮球进球集锦添加燃向适配背景音乐，选择热血动感的篮球主题嘻哈BGM，音量设置为0.3，既能烘托氛围也保留原进球现场音效的辨识度\",\n  \"final_answer\": \"已为您的篮球进球集锦添加了热血燃向的篮球主题背景音乐，BGM音量设置为0.3，既可以烘托紧张热血的比赛氛围，也不会掩盖原视频里进球的现场音效哦\",\n  \"summary\": \"已完成筛选，共保留10个穿白色23号球衣球员的完整进球片段，删除了其余无关内容，整体为篮球1v1对抗白方球员进球集锦，总时长约56秒。\",\n  \"segments\": [\n    { \"start\": 0.0, \"end\": 13.0, \"energy\": 0.9, \"label\": \"持球突破防守后跳投命中\" },\n    { \"start\": 13.0, \"end\": 17.0, \"energy\": 0.85, \"label\": \"运球后后撤步三分出手命中\" },\n    { \"start\": 17.0, \"end\": 20.0, \"energy\": 0.9, \"label\": \"超远三分投篮命中\" },\n    { \"start\": 20.0, \"end\": 22.5, \"energy\": 0.8, \"label\": \"抢断后突破上篮命中\" },\n    { \"start\": 22.5, \"end\": 25.5, \"energy\": 0.85, \"label\": \"接球后三分出手命中\" },\n    { \"start\": 25.5, \"end\": 28.5, \"energy\": 0.8, \"label\": \"后撤步三分出手命中\" },\n    { \"start\": 28.5, \"end\": 32.0, \"energy\": 0.85, \"label\": \"运球后后撤步三分出手命中\" },\n    { \"start\": 32.0, \"end\": 34.5, \"energy\": 0.8, \"label\": \"抢断后突破上篮命中\" },\n    { \"start\": 34.5, \"end\": 37.5, \"energy\": 0.8, \"label\": \"突破防守后上篮命中\" },\n    { \"start\": 37.5, \"end\": 56.0, \"energy\": 0.95, \"label\": \"超远三分出手命中完成绝杀\" }\n  ],\n  \"events\": [],\n  \"edits\": [\n    { \"type\": \"bgm\", \"keywords\": \"energetic hype basketball hip hop\", \"volume\": 0.3 }\n  ]\n}"
+[22:27:54.555] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "0.00-13.00",
+      "start": 0,
+      "end": 13,
+      "dur": 13
+    },
+    {
+      "id": "37.50-56.00",
+      "start": 37.5,
+      "end": 56,
+      "dur": 18.5
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "0.00-13.00",
+      "start": 0,
+      "end": 13,
+      "timelineStart": 0,
+      "displayDuration": 13,
+      "playbackRate": 1
+    },
+    {
+      "id": "37.50-56.00",
+      "start": 37.5,
+      "end": 56,
+      "timelineStart": 13,
+      "displayDuration": 18.5,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 31.5,
+  "videoDuration": 358.561667,
+  "textEdits": [],
+  "fadeEdits": []
+}
+[22:30:16.003] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "dur": 32.002
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "timelineStart": 0,
+      "displayDuration": 32.002,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 32.002,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}
+[22:30:24.859] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "dur": 32.002
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "timelineStart": 0,
+      "displayDuration": 32.002,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 32.002,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}
