@@ -22,9 +22,10 @@ import { searchAndDownloadBgm } from "../utils/fetchBgm.js";
  * @param {object} aiOutput - { segments, events, edits, summary }
  * @param {object} videoSource - { name, path, duration, width, height, fps }
  * @param {string} sessionId
+ * @param {Function} onProgress - 进度回调
  * @returns {Promise<object>} draft
  */
-export async function aiOutputToDraft(aiOutput, videoSource, sessionId) {
+export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgress) {
   const draft = createEmptyDraft();
 
   // 添加视频源
@@ -52,7 +53,7 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId) {
 
   // 转换 edits（各种编辑操作）
   if (aiOutput.edits && aiOutput.edits.length > 0) {
-    await convertEditsToDraft(aiOutput.edits, draft, videoTrack, sessionId);
+    await convertEditsToDraft(aiOutput.edits, draft, videoTrack, sessionId, onProgress);
   }
 
   // 更新总时长
@@ -92,7 +93,7 @@ function convertSegmentsToDraft(segments, videoTrack, sourceId, totalDuration) {
 /**
  * 转换 edits 到对应的轨道
  */
-async function convertEditsToDraft(edits, draft, videoTrack, sessionId) {
+async function convertEditsToDraft(edits, draft, videoTrack, sessionId, onProgress) {
   const textEdits = edits.filter(e => e.type === "text");
   const fadeEdits = edits.filter(e => e.type === "fade");
   const speedEdits = edits.filter(e => e.type === "speed");
@@ -110,9 +111,11 @@ async function convertEditsToDraft(edits, draft, videoTrack, sessionId) {
     // 立即下载 BGM
     for (const edit of bgmEdits) {
       try {
+        onProgress?.(`🎵 正在下载背景音乐...`);
         console.log(`[aiToDraft] Downloading BGM with keywords: "${edit.keywords}"`);
         const bgm = await searchAndDownloadBgm(edit.keywords, sessionId || `bgm-${Date.now()}`);
         console.log(`[aiToDraft] BGM downloaded: ${bgm.title} - ${bgm.artist} (${bgm.path})`);
+        onProgress?.(`✅ 背景音乐已下载: ${bgm.title}`);
 
         audioTrack.segments.push({
           id: `seg-a-bgm-${Date.now()}`,

@@ -23,6 +23,7 @@ export default function App() {
   const [timeline, setTimeline] = useState(null);
   const [draft, setDraft] = useState(null); // 新增：Draft 状态
   const [bgmUrl, setBgmUrl] = useState(null); // 新增：BGM 文件 URL
+  const [bgmVolume, setBgmVolume] = useState(0.3);
   const [activeClipId, setActiveClipId] = useState(null);
   const [analysisStatus, setAnalysisStatus] = useState("idle");
   const [analysisSource, setAnalysisSource] = useState("local");
@@ -241,13 +242,8 @@ export default function App() {
       // 构建 API URL 来获取音频文件
       const bgmApiUrl = `${apiBase}/api/audio/${encodeURIComponent(audioSegment.sourceFile)}`;
       setBgmUrl(bgmApiUrl);
-      console.log('[BGM] Loading audio from:', bgmApiUrl);
-
-      // 设置音量
-      if (audioRef.current) {
-        audioRef.current.volume = audioSegment.volume || 0.3;
-        console.log('[BGM] Set volume to:', audioRef.current.volume);
-      }
+      setBgmVolume(audioSegment.volume || 0.3);
+      console.log('[BGM] Loading audio from:', bgmApiUrl, 'volume:', audioSegment.volume || 0.3);
     } else {
       console.log('[BGM] No sourceFile in segment');
       setBgmUrl(null);
@@ -1438,6 +1434,7 @@ export default function App() {
                     ref={audioRef}
                     src={bgmUrl}
                     loop
+                    onCanPlay={() => { if (audioRef.current) audioRef.current.volume = bgmVolume; }}
                     style={{ display: 'none' }}
                   />
                 )}

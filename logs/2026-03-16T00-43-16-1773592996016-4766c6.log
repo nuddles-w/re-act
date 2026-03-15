@@ -1,0 +1,102 @@
+[00:43:16.017] [INFO] [analyze] start
+{
+  "name": "IMG_5962_edited.mp4",
+  "size": 16664237,
+  "duration": 32.002,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "添加一个很燃的背景音乐 ",
+  "engine": "auto"
+}
+[00:43:17.961] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-15T16:43:16.017Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "IMG_5962_edited.mp4",
+      "size": 16664237,
+      "duration": 32.002,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "添加一个很燃的背景音乐 ",
+      "engine": "auto"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户要求添加一个“很燃”的背景音乐。我将使用 'add_bgm' 工具并指定关键词 'energetic' 或 'epic' 来代表“很燃”，并将音量设置为0.3，以确保它不会完全覆盖视频的原声。"
+  },
+  {
+    "time": "2026-03-15T16:43:17.961Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-auto",
+      "edits": 1
+    }
+  }
+]
+[00:43:17.961] [DATA] [analyze] result.features
+{
+  "duration": 32.002,
+  "segmentCount": 0,
+  "segments": [],
+  "keyframes": [],
+  "rhythmScore": 0,
+  "events": [],
+  "edits": [
+    {
+      "type": "bgm",
+      "start": 0,
+      "end": 32.002,
+      "keywords": "energetic epic",
+      "volume": 0.3
+    }
+  ],
+  "summary": "已为您添加了一个很燃的背景音乐！",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户要求添加一个“很燃”的背景音乐。我将使用 'add_bgm' 工具并指定关键词 'energetic' 或 'epic' 来代表“很燃”，并将音量设置为0.3，以确保它不会完全覆盖视频的原声。"
+    }
+  ],
+  "performance": {
+    "totalTime": "1.9s",
+    "rounds": 1,
+    "tokensIn": 3315,
+    "tokensOut": 147,
+    "totalTokens": 3462,
+    "cost": "$0.0014",
+    "orchestratorCalls": 1,
+    "videoAnalysisCalls": 0
+  }
+}
+[00:43:17.962] [INFO] [analyze] done
+{
+  "source": "agent-loop-auto",
+  "segmentCount": 0,
+  "events": 0,
+  "edits": 1
+}
+[00:43:27.517] [DATA] [analyze] rawResponse
+"{\n  \"thought\": \"用户要求添加一个“很燃”的背景音乐。我将使用 'add_bgm' 工具并指定关键词 'energetic' 或 'epic' 来代表“很燃”，并将音量设置为0.3，以确保它不会完全覆盖视频的原声。\",\n  \"edits\": [\n    {\n      \"type\": \"bgm\",\n      \"keywords\": \"energetic epic\",\n      \"volume\": 0.3\n    }\n  ],\n  \"final_answer\": \"已为您添加了一个很燃的背景音乐！\",\n  \"summary\": \"\",\n  \"segments\": [],\n  \"events\": []\n}"
+[00:43:27.531] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 32.002,
+      "timelineStart": 0,
+      "displayDuration": 32.002,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 32.002,
+  "videoDuration": 32.002,
+  "textEdits": [],
+  "fadeEdits": []
+}

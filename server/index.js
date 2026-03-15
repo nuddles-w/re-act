@@ -378,7 +378,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         fps: 30,
       };
 
-      const draft = await aiOutputToDraft(result.features, videoSource, newSessionId);
+      const draft = await aiOutputToDraft(result.features, videoSource, newSessionId, emitProgress);
 
       // 更新 draft 到 DraftManager
       draftManager.updateDraft(newSessionId, {

@@ -1,0 +1,9 @@
+[00:07:34.150] [INFO] [analyze] start
+{
+  "name": "IMG_5962.MOV",
+  "size": 394329811,
+  "duration": 358.561667,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "识别出所有进球的片段，把没有投进或者上篮不进的片段删除\r\n",
+  "engine": "doubao"
+}

@@ -59,9 +59,17 @@ async function searchJamendo(clientId, extraParams) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-async function downloadFile(url, destPath) {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
-  if (!resp.ok) throw new Error(`Failed to download BGM: ${resp.status}`);
-  const buffer = await resp.arrayBuffer();
-  fs.writeFileSync(destPath, Buffer.from(buffer));
+async function downloadFile(url, destPath, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!resp.ok) throw new Error(`Failed to download BGM: ${resp.status}`);
+      const buffer = await resp.arrayBuffer();
+      fs.writeFileSync(destPath, Buffer.from(buffer));
+      return;
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
 }
