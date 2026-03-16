@@ -1,0 +1,292 @@
+[11:50:37.154] [INFO] [analyze] start
+{
+  "name": "1E2C715E-421C-4E90-9929-83902DBC8ED7.mov",
+  "size": 39345775,
+  "duration": 57.538005,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "将这个视频剪辑成适合发布到抖音的",
+  "engine": "doubao"
+}
+[11:52:00.960] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-16T03:50:37.154Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "1E2C715E-421C-4E90-9929-83902DBC8ED7.mov",
+      "size": 39345775,
+      "duration": 57.538005,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "将这个视频剪辑成适合发布到抖音的",
+      "engine": "doubao"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户需要将视频剪辑为适合抖音发布的版本，首先需要分析视频的内容类型、高光时刻等信息，才能确定符合抖音短视频调性的剪辑策略",
+    "action": "analyze_video()",
+    "observation": {
+      "events": 6,
+      "description": "视频展示了鸡蛋沙拉厚吐司的制作过程，将熟鸡蛋混合酱料捣碎后堆放在经过烘烤处理的厚吐司上，添加调味后完成餐品。"
+    }
+  },
+  {
+    "round": 2,
+    "thought": "该视频为美食制作类内容，适合抖音发布的剪辑策略为保留全部核心制作步骤，对无操作的烤制等待部分适当加速压缩时长，总时长控制在45秒左右，符合抖音短视频的时长要求，不添加用户未明确要求的额外元素"
+  },
+  {
+    "time": "2026-03-16T03:52:00.960Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-doubao",
+      "engine": "doubao",
+      "edits": 2
+    }
+  }
+]
+[11:52:00.961] [DATA] [analyze] result.features
+{
+  "duration": 57.538005,
+  "segmentCount": 6,
+  "segments": [
+    {
+      "id": "0.00-10.00",
+      "start": 0,
+      "end": 10,
+      "duration": 10,
+      "energy": 0.7,
+      "label": "制作鸡蛋沙拉",
+      "tags": {}
+    },
+    {
+      "id": "10.00-15.00",
+      "start": 10,
+      "end": 15,
+      "duration": 5,
+      "energy": 0.6,
+      "label": "切割厚吐司片",
+      "tags": {}
+    },
+    {
+      "id": "15.00-28.00",
+      "start": 15,
+      "end": 28,
+      "duration": 13,
+      "energy": 0.5,
+      "label": "第一次烤制厚吐司",
+      "tags": {}
+    },
+    {
+      "id": "28.00-38.00",
+      "start": 28,
+      "end": 38,
+      "duration": 10,
+      "energy": 0.5,
+      "label": "吐司涂黄油二次烘烤",
+      "tags": {}
+    },
+    {
+      "id": "38.00-51.00",
+      "start": 38,
+      "end": 51,
+      "duration": 13,
+      "energy": 0.9,
+      "label": "厚吐司堆放鸡蛋沙拉",
+      "tags": {}
+    },
+    {
+      "id": "51.00-56.00",
+      "start": 51,
+      "end": 56,
+      "duration": 5,
+      "energy": 0.8,
+      "label": "调味装饰完成餐品",
+      "tags": {}
+    }
+  ],
+  "keyframes": [
+    {
+      "time": 5,
+      "energy": 0.7
+    },
+    {
+      "time": 12.5,
+      "energy": 0.6
+    },
+    {
+      "time": 21.5,
+      "energy": 0.5
+    },
+    {
+      "time": 33,
+      "energy": 0.5
+    },
+    {
+      "time": 44.5,
+      "energy": 0.9
+    },
+    {
+      "time": 53.5,
+      "energy": 0.8
+    }
+  ],
+  "rhythmScore": 0.67,
+  "events": [
+    {
+      "label": "将熟鸡蛋倒入盆中，加入调味酱后捣碎成鸡蛋沙拉",
+      "start": 0,
+      "end": 10,
+      "confidence": 1
+    },
+    {
+      "label": "取出整条吐司并切割得到厚吐司片",
+      "start": 10,
+      "end": 15,
+      "confidence": 1
+    },
+    {
+      "label": "将厚吐司放入烤箱烤制，取出后刮掉表面烤焦的部分",
+      "start": 15,
+      "end": 28,
+      "confidence": 1
+    },
+    {
+      "label": "在厚吐司内部切开口，涂抹黄油后再次放入烤箱烘烤",
+      "start": 28,
+      "end": 38,
+      "confidence": 1
+    },
+    {
+      "label": "将制作好的鸡蛋沙拉大量堆放在处理好的厚吐司上",
+      "start": 38,
+      "end": 51,
+      "confidence": 1
+    },
+    {
+      "label": "在鸡蛋沙拉表面撒调味料、挤番茄酱，完成餐品制作并展示",
+      "start": 51,
+      "end": 56,
+      "confidence": 1
+    }
+  ],
+  "edits": [
+    {
+      "type": "speed",
+      "start": 15,
+      "end": 28,
+      "rate": 1.8
+    },
+    {
+      "type": "speed",
+      "start": 28,
+      "end": 38,
+      "rate": 1.8
+    }
+  ],
+  "summary": "已为你剪辑好适合抖音发布的版本，保留了鸡蛋沙拉厚吐司制作的全部核心步骤，对烤制等待环节适当加速，最终时长约46秒，节奏紧凑适合短视频平台传播",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户需要将视频剪辑为适合抖音发布的版本，首先需要分析视频的内容类型、高光时刻等信息，才能确定符合抖音短视频调性的剪辑策略",
+      "action": "analyze_video()",
+      "observation": {
+        "events": 6,
+        "description": "视频展示了鸡蛋沙拉厚吐司的制作过程，将熟鸡蛋混合酱料捣碎后堆放在经过烘烤处理的厚吐司上，添加调味后完成餐品。"
+      }
+    },
+    {
+      "round": 2,
+      "thought": "该视频为美食制作类内容，适合抖音发布的剪辑策略为保留全部核心制作步骤，对无操作的烤制等待部分适当加速压缩时长，总时长控制在45秒左右，符合抖音短视频的时长要求，不添加用户未明确要求的额外元素"
+    }
+  ],
+  "performance": {
+    "totalTime": "83.8s",
+    "rounds": 2,
+    "tokensIn": 38745,
+    "tokensOut": 3480,
+    "totalTokens": 42225,
+    "cost": "$0.0000",
+    "orchestratorCalls": 2,
+    "videoAnalysisCalls": 1
+  }
+}
+[11:52:00.961] [INFO] [analyze] done
+{
+  "source": "agent-loop-doubao",
+  "segmentCount": 6,
+  "events": 6,
+  "edits": 2
+}
+[11:52:00.964] [DATA] [analyze] rawResponse
+"{\n    \"thought\": \"该视频为美食制作类内容，适合抖音发布的剪辑策略为保留全部核心制作步骤，对无操作的烤制等待部分适当加速压缩时长，总时长控制在45秒左右，符合抖音短视频的时长要求，不添加用户未明确要求的额外元素\",\n    \"final_answer\": \"已为你剪辑好适合抖音发布的版本，保留了鸡蛋沙拉厚吐司制作的全部核心步骤，对烤制等待环节适当加速，最终时长约46秒，节奏紧凑适合短视频平台传播\",\n    \"summary\": \"视频为鸡蛋沙拉厚吐司制作教程，完整步骤为：制作鸡蛋沙拉→切割厚吐司→第一次烤制吐司并处理焦面→吐司开口涂黄油二次烘烤→堆放鸡蛋沙拉→表面调味装饰完成餐品\",\n    \"segments\": [\n        {\"start\": 0.0, \"end\": 10.0, \"energy\": 0.7, \"label\": \"制作鸡蛋沙拉\"},\n        {\"start\": 10.0, \"end\": 15.0, \"energy\": 0.6, \"label\": \"切割厚吐司片\"},\n        {\"start\": 15.0, \"end\": 28.0, \"energy\": 0.5, \"label\": \"第一次烤制厚吐司\"},\n        {\"start\": 28.0, \"end\": 38.0, \"energy\": 0.5, \"label\": \"吐司涂黄油二次烘烤\"},\n        {\"start\": 38.0, \"end\": 51.0, \"energy\": 0.9, \"label\": \"厚吐司堆放鸡蛋沙拉\"},\n        {\"start\": 51.0, \"end\": 56.0, \"energy\": 0.8, \"label\": \"调味装饰完成餐品\"}\n    ],\n    \"events\": [\n        {\"label\": \"将熟鸡蛋倒入盆中，加入调味酱后捣碎成鸡蛋沙拉\", \"start\": 0.0, \"end\": 10.0, \"confidence\": 1.0},\n        {\"label\": \"取出整条吐司并切割得到厚吐司片\", \"start\": 10.0, \"end\": 15.0, \"confidence\": 1.0},\n        {\"label\": \"将厚吐司放入烤箱烤制，取出后刮掉表面烤焦的部分\", \"start\": 15.0, \"end\": 28.0, \"confidence\": 1.0},\n        {\"label\": \"在厚吐司内部切开口，涂抹黄油后再次放入烤箱烘烤\", \"start\": 28.0, \"end\": 38.0, \"confidence\": 1.0},\n        {\"label\": \"将制作好的鸡蛋沙拉大量堆放在处理好的厚吐司上\", \"start\": 38.0, \"end\": 51.0, \"confidence\": 1.0},\n        {\"label\": \"在鸡蛋沙拉表面撒调味料、挤番茄酱，完成餐品制作并展示\", \"start\": 51.0, \"end\": 56.0, \"confidence\": 1.0}\n    ],\n    \"edits\": [\n        {\"type\": \"speed\", \"start\": 15.0, \"end\": 28.0, \"rate\": 1.8},\n        {\"type\": \"speed\", \"start\": 28.0, \"end\": 38.0, \"rate\": 1.8}\n    ]\n}"
+[11:52:00.973] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [
+    {
+      "id": "0.00-10.00",
+      "start": 0,
+      "end": 10,
+      "dur": 10
+    },
+    {
+      "id": "10.00-15.00",
+      "start": 10,
+      "end": 15,
+      "dur": 5
+    },
+    {
+      "id": "38.00-51.00",
+      "start": 38,
+      "end": 51,
+      "dur": 13
+    },
+    {
+      "id": "51.00-56.00",
+      "start": 51,
+      "end": 56,
+      "dur": 5
+    }
+  ],
+  "resultClips": [
+    {
+      "id": "0.00-10.00",
+      "start": 0,
+      "end": 10,
+      "timelineStart": 0,
+      "displayDuration": 10,
+      "playbackRate": 1
+    },
+    {
+      "id": "10.00-15.00",
+      "start": 10,
+      "end": 15,
+      "timelineStart": 10,
+      "displayDuration": 5,
+      "playbackRate": 1
+    },
+    {
+      "id": "38.00-51.00",
+      "start": 38,
+      "end": 51,
+      "timelineStart": 15,
+      "displayDuration": 13,
+      "playbackRate": 1
+    },
+    {
+      "id": "51.00-56.00",
+      "start": 51,
+      "end": 56,
+      "timelineStart": 28,
+      "displayDuration": 5,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 33,
+  "videoDuration": 57.538005,
+  "textEdits": [],
+  "fadeEdits": []
+}

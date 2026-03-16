@@ -498,6 +498,8 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       }
     } else if (errorStr.includes("FFmpeg compress exited")) {
       userMessage = "❌ 视频压缩失败。可能是视频格式不支持或 FFmpeg 配置问题。";
+    } else if (errorStr.includes("User location is not supported")) {
+      userMessage = "❌ Gemini API 地区限制：当前地理位置不支持使用该 API。建议：\n1. 使用 VPN 切换到支持的地区\n2. 或切换到 Doubao 引擎";
     } else {
       // 通用错误，显示简化的错误信息
       const match = errorStr.match(/Error: (.+?)(?:\n|$)/);

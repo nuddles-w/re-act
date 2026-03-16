@@ -1,0 +1,49 @@
+[11:44:13.469] [INFO] [analyze] start
+{
+  "name": "1E2C715E-421C-4E90-9929-83902DBC8ED7.mov",
+  "size": 39345775,
+  "duration": 57.538005,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "将这个视频剪成一个适合在抖音平台发布的视频",
+  "engine": "auto"
+}
+[11:44:14.701] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-16T03:44:13.469Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "1E2C715E-421C-4E90-9929-83902DBC8ED7.mov",
+      "size": 39345775,
+      "duration": 57.538005,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "将这个视频剪成一个适合在抖音平台发布的视频",
+      "engine": "auto"
+    }
+  },
+  {
+    "round": 1,
+    "error": "Error: [GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent: [400 Bad Request] User location is not supported for the API use."
+  },
+  {
+    "time": "2026-03-16T03:44:14.701Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-timeout",
+      "engine": "auto",
+      "edits": 0
+    }
+  }
+]
+[11:44:14.701] [DATA] [analyze] result.features
+null
+[11:44:14.701] [INFO] [analyze] done
+{
+  "source": "agent-loop-timeout",
+  "events": 0,
+  "edits": 0
+}

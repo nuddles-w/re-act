@@ -232,7 +232,7 @@ export const parseFeatures = (text, durationLimit = 0) => {
         };
       }
 
-      if (rawType === "speed") {
+      if (rawType === "speed" || rawType === "adjust_speed") {
         const rate = Number(edit.rate ?? edit.speed ?? 1);
         return {
           ...edit,

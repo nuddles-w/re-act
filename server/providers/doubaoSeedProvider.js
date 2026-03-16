@@ -220,6 +220,9 @@ export async function prepareDoubaoUpload(video, apiKey, onProgress = null) {
 
     let inputPath = video.path;
     if (!inputPath || !fs.existsSync(inputPath)) {
+      if (!video.buffer) {
+        throw new Error("Video file not available: no path and no buffer");
+      }
       tempInputPath = path.join(os.tmpdir(), `doubao-prep-${Date.now()}-${video.name}`);
       fs.writeFileSync(tempInputPath, video.buffer);
       inputPath = tempInputPath;

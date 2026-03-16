@@ -271,11 +271,15 @@ export default function App() {
   useEffect(() => {
     if (!duration) return;
     let baseTimeline;
-    if (features) {
-      // AI 分析完成后：根据 features 构建多段时间线
+
+    // 如果有 delete edits，从完整视频开始应用（避免 segments 和 delete 区间不匹配）
+    const hasDeleteEdits = combinedEdits.some(e => e?.type === "delete");
+
+    if (features && !hasDeleteEdits) {
+      // AI 分析完成且无 delete edits：根据 features 构建多段时间线
       baseTimeline = buildTimeline(features, intent);
     } else {
-      // 未进行 AI 分析：展示完整视频为一段，不做任何剪切
+      // 未进行 AI 分析或有 delete edits：从完整视频开始
       baseTimeline = {
         clips: [{ id: "base-clip", start: 0, end: duration, duration, energy: 0.5, label: "Original Video", reason: "完整视频" }],
         totalDuration: duration,
@@ -832,7 +836,14 @@ export default function App() {
             });
 
           } else if (payload.type === "error") {
-            throw new Error(payload.message || "分析失败");
+            // 不要抛出异常，而是设置错误状态并显示消息
+            setAnalysisStatus("error");
+            appendChatMessage({
+              role: "system",
+              time: new Date().toLocaleTimeString(),
+              message: payload.message || "分析失败",
+            });
+            return; // 提前退出，不继续处理
           }
         }
       }
