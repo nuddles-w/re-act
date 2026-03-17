@@ -38,6 +38,7 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgre
   const edits = aiOutput.edits || [];
   const speedEdits = edits.filter(e => e.type === "speed");
   const deleteEdits = edits.filter(e => e.type === "delete");
+  const volumeEdits = edits.filter(e => e.type === "volume" || e.type === "audio");
   const textEdits = edits.filter(e => e.type === "text");
   const fadeEdits = edits.filter(e => e.type === "fade");
   const bgmEdits = edits.filter(e => e.type === "bgm");
@@ -68,6 +69,11 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgre
     // 再应用 speed edits（调整速度）
     speedEdits.forEach(edit => {
       applySpeedEditToSegments(videoTrack, edit);
+    });
+
+    // 应用 volume edits（调整音量）
+    volumeEdits.forEach(edit => {
+      applyVolumeEditToSegments(videoTrack, edit);
     });
   }
 
@@ -367,5 +373,26 @@ function applyDeleteEditToSegments(videoTrack, deleteEdit) {
   videoTrack.segments.forEach(segment => {
     segment.timelineStart = currentTime;
     currentTime += segment.timelineDuration;
+  });
+}
+
+/**
+ * 应用音量调整到视频片段
+ */
+function applyVolumeEditToSegments(videoTrack, volumeEdit) {
+  const { start, end, volume } = volumeEdit;
+
+  videoTrack.segments.forEach(segment => {
+    const segStart = segment.sourceStart;
+    const segEnd = segment.sourceEnd;
+
+    // 检查片段是否在音量调整范围内
+    if (segStart >= start - 0.1 && segEnd <= end + 0.1) {
+      // 完全在范围内，调整音量
+      segment.volume = volume;
+    } else if (segStart < end && segEnd > start) {
+      // 部分重叠，也应用音量（简化处理，不分割）
+      segment.volume = volume;
+    }
   });
 }

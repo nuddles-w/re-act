@@ -1,0 +1,102 @@
+[17:48:12.910] [INFO] [analyze] start
+{
+  "name": "2æ12æ¥.mov",
+  "size": 18127869,
+  "duration": 15.766667,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "静音这个视频",
+  "engine": "auto"
+}
+[17:48:15.301] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-17T09:48:12.908Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "2æ12æ¥.mov",
+      "size": 18127869,
+      "duration": 15.766667,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "静音这个视频",
+      "engine": "auto"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户要求静音视频，直接通过 edits 调整整个视频的音量即可。"
+  },
+  {
+    "time": "2026-03-17T09:48:15.301Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-auto",
+      "engine": "auto",
+      "edits": 1
+    }
+  }
+]
+[17:48:15.301] [DATA] [analyze] result.features
+{
+  "duration": 15.766667,
+  "segmentCount": 0,
+  "segments": [],
+  "keyframes": [],
+  "rhythmScore": 0,
+  "events": [],
+  "edits": [
+    {
+      "type": "volume",
+      "start": 0,
+      "end": 15.766667,
+      "volume": 0
+    }
+  ],
+  "summary": "视频已静音。",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户要求静音视频，直接通过 edits 调整整个视频的音量即可。"
+    }
+  ],
+  "performance": {
+    "totalTime": "2.4s",
+    "rounds": 1,
+    "tokensIn": 3554,
+    "tokensOut": 117,
+    "totalTokens": 3671,
+    "cost": "$0.0014",
+    "orchestratorCalls": 1,
+    "videoAnalysisCalls": 0
+  }
+}
+[17:48:15.301] [INFO] [analyze] done
+{
+  "source": "agent-loop-auto",
+  "segmentCount": 0,
+  "events": 0,
+  "edits": 1
+}
+[17:48:15.303] [DATA] [analyze] rawResponse
+"{\n  \"thought\": \"用户要求静音视频，直接通过 edits 调整整个视频的音量即可。\",\n  \"final_answer\": \"视频已静音。\",\n  \"summary\": \"\",\n  \"segments\": [],\n  \"events\": [],\n  \"edits\": [\n    {\n      \"type\": \"volume\",\n      \"start\": 0.0,\n      \"end\": 15.766667,\n      \"volume\": 0.0\n    }\n  ]\n}"
+[17:48:15.317] [DATA] [timeline-build] timeline constructed
+{
+  "baseClips": [],
+  "resultClips": [
+    {
+      "id": "base-clip",
+      "start": 0,
+      "end": 15.766667,
+      "timelineStart": 0,
+      "displayDuration": 15.766667,
+      "playbackRate": 1
+    }
+  ],
+  "totalTimelineDuration": 15.766667,
+  "videoDuration": 15.766667,
+  "textEdits": [],
+  "fadeEdits": []
+}

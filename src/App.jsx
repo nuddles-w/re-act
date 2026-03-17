@@ -118,7 +118,7 @@ export default function App() {
       const videoTrack = draft.tracks.find(t => t.type === "video");
       if (videoTrack && videoTrack.segments) {
         // 转换 Draft segment 为 clip 格式（兼容现有逻辑）
-        return videoTrack.segments.map(seg => ({
+        const clips = videoTrack.segments.map(seg => ({
           id: seg.id,
           start: seg.sourceStart,
           end: seg.sourceEnd,
@@ -131,6 +131,8 @@ export default function App() {
           sourceEnd: seg.sourceEnd,
           timelineDuration: seg.timelineDuration,
         }));
+        console.log('[effectiveClips] from Draft:', clips.map(c => ({ id: c.id, volume: c.volume })));
+        return clips;
       }
     }
     return timeline?.clips || [];
@@ -526,6 +528,7 @@ export default function App() {
         }
         const targetVolume = currentClip.volume ?? 1;
         if (videoRef.current.volume !== targetVolume) {
+          console.log(`[volume] Setting video volume to ${targetVolume} (clip: ${currentClip.id})`);
           videoRef.current.volume = targetVolume;
         }
         if (activeClipRef.current?.id !== currentClip.id) {
@@ -829,8 +832,12 @@ export default function App() {
             // 保存会话 ID
             if (data.sessionId) {
               setSessionId(data.sessionId);
-              // 获取 Draft
-              fetchDraft(data.sessionId);
+            }
+
+            // 每次对话完成后都重新获取 Draft（包括多轮对话）
+            const targetSessionId = data.sessionId || sessionId;
+            if (targetSessionId) {
+              fetchDraft(targetSessionId);
             }
 
             setFeatures(prev => ({

@@ -432,7 +432,7 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         console.log(`[analyze:${requestId}] draft managed by tools`);
       }
     } else if (existingSession) {
-      // 多轮对话：Draft 由 AI 通过工具直接操作，无需额外处理
+      // 多轮对话：Draft 由 AI 通过工具直接操作，不要重新创建
       console.log(`[analyze:${requestId}] draft updated via tools in session ${newSessionId}`);
     }
 

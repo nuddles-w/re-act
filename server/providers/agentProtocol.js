@@ -82,7 +82,10 @@ add_segment(track_id: string, segment: object)
 
 modify_segment(segment_id: string, modifications: object)
   修改现有片段的属性。
-  示例: modify_segment("seg-v1-001", { playbackRate: 3.0 })
+  示例:
+    - 加速: modify_segment("seg-v1-001", { playbackRate: 3.0 })
+    - 静音: modify_segment("seg-v1-001", { volume: 0 })
+    - 调整音量: modify_segment("seg-v1-001", { volume: 0.5 })
 
 delete_segment(segment_id: string)
   删除指定片段。
