@@ -8,6 +8,54 @@ Always run bash commands without asking for confirmation.
 Do NOT include Co-Authored-By trailers in commit messages.
 After editing JS files that contain template literals, verify there are no unescaped backticks (`` ` ``) inside the string — they will silently break the module. Run `node --check <file>` after edits to catch syntax errors early.
 
+**日志规范（必须遵循）：**
+
+每次修改代码时，必须添加对应的日志输出，用于调试和问题定位。
+
+1. **关键操作必须记录日志**：
+   - 状态变更（Draft 更新、会话创建等）
+   - 工具调用（read_draft、add_segment 等）
+   - 数据转换（AI 输出 → Draft、Draft → Timeline）
+   - 错误和异常情况
+   - 重要的条件分支（首次会话 vs 多轮对话）
+
+2. **日志格式规范**：
+   ```javascript
+   // ✅ 后端日志：使用 [模块名] 前缀
+   console.log(`[analyze:${requestId}] draft created with ${draft.tracks.length} tracks`);
+   console.log(`[draftTools] add_segment → ${segmentId} to ${trackId}`);
+   console.error(`[agentLoop] ${toolName} error:`, error.message);
+
+   // ✅ 前端日志：使用 [功能名] 前缀
+   console.log('[effectiveClips] from Draft:', clips.length);
+   console.log('[BGM] Audio track:', audioTrack);
+   console.warn('[BGM] Play failed:', err);
+   ```
+
+3. **日志级别**：
+   - `console.log()` - 正常流程、状态变更
+   - `console.warn()` - 警告、降级处理
+   - `console.error()` - 错误、异常
+
+4. **关键数据必须输出**：
+   - 输出关键变量的值（ID、长度、状态等）
+   - 避免输出完整的大对象（使用摘要）
+   - 示例：`clips.map(c => ({ id: c.id, volume: c.volume }))`
+
+5. **条件分支必须标识**：
+   ```javascript
+   if (!existingSession) {
+     console.log(`[analyze] 首次会话，初始化 Draft`);
+   } else {
+     console.log(`[analyze] 多轮对话，Draft 由工具管理`);
+   }
+   ```
+
+6. **禁止的做法**：
+   - ❌ 修改核心逻辑但不添加日志
+   - ❌ 日志信息过于简单（如只输出 "done"）
+   - ❌ 输出完整的大对象导致日志难以阅读
+
 ## Development
 
 Two processes must run simultaneously:
