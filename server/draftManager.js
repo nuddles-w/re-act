@@ -25,7 +25,15 @@ class DraftManager {
       return createEmptyDraft();
     }
     if (!this.drafts.has(sessionId)) {
-      this.drafts.set(sessionId, createEmptyDraft());
+      const emptyDraft = createEmptyDraft();
+      // 初始化基础轨道
+      emptyDraft.tracks = [
+        { id: "V1", type: "video", enabled: true, locked: false, segments: [] },
+        { id: "A1", type: "audio", enabled: true, locked: false, segments: [] },
+        { id: "T1", type: "text", enabled: true, locked: false, segments: [] },
+        { id: "FX1", type: "effect", enabled: true, locked: false, segments: [] },
+      ];
+      this.drafts.set(sessionId, emptyDraft);
     }
     return this.drafts.get(sessionId);
   }

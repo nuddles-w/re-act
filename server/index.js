@@ -406,8 +406,8 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       }
     );
 
-    // ── 转换 AI 输出为 Draft（使用 newSessionId）──────────────────
-    if (result.features && newSessionId) {
+    // ── 初始化 Draft（仅首次会话）──────────────────────────────────
+    if (!existingSession && newSessionId) {
       const draftManager = getDraftManager();
       const videoSource = {
         name: videoFile?.originalname || "video",
@@ -418,15 +418,22 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         fps: 30,
       };
 
-      const draft = await aiOutputToDraft(result.features, videoSource, newSessionId, emitProgress);
-
-      // 更新 draft 到 DraftManager
-      draftManager.updateDraft(newSessionId, {
-        type: "replace_draft",
-        data: { draft },
-      });
-
-      console.log(`[analyze:${requestId}] draft created with ${draft.tracks.length} tracks`);
+      // 首次会话：如果 AI 输出了传统 edits，转换为 Draft（向后兼容）
+      if (result.features && (result.features.edits?.length > 0 || result.features.segments?.length > 0)) {
+        emitProgress("📝 转换编辑指令为草稿...");
+        const draft = await aiOutputToDraft(result.features, videoSource, newSessionId, emitProgress);
+        draftManager.updateDraft(newSessionId, {
+          type: "replace_draft",
+          data: { draft },
+        });
+        console.log(`[analyze:${requestId}] draft created with ${draft.tracks.length} tracks (legacy mode)`);
+      } else {
+        // AI 使用了 Draft 工具，Draft 已经在工具执行时更新了
+        console.log(`[analyze:${requestId}] draft managed by tools`);
+      }
+    } else if (existingSession) {
+      // 多轮对话：Draft 由 AI 通过工具直接操作，无需额外处理
+      console.log(`[analyze:${requestId}] draft updated via tools in session ${newSessionId}`);
     }
 
     // 记录对话（existing session 已在前面记录了 user，这里只加 assistant）

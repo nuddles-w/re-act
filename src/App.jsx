@@ -112,6 +112,30 @@ export default function App() {
     return draft?.settings?.totalDuration || timeline?.totalTimelineDuration || duration;
   }, [draft, timeline, duration]);
 
+  // 统一获取视频片段：优先 Draft，fallback 到 Timeline
+  const effectiveClips = useMemo(() => {
+    if (draft && draft.tracks) {
+      const videoTrack = draft.tracks.find(t => t.type === "video");
+      if (videoTrack && videoTrack.segments) {
+        // 转换 Draft segment 为 clip 格式（兼容现有逻辑）
+        return videoTrack.segments.map(seg => ({
+          id: seg.id,
+          start: seg.sourceStart,
+          end: seg.sourceEnd,
+          timelineStart: seg.timelineStart,
+          displayDuration: seg.timelineDuration,
+          playbackRate: seg.playbackRate,
+          volume: seg.volume,
+          // Draft 特有字段
+          sourceStart: seg.sourceStart,
+          sourceEnd: seg.sourceEnd,
+          timelineDuration: seg.timelineDuration,
+        }));
+      }
+    }
+    return timeline?.clips || [];
+  }, [draft, timeline]);
+
   const computedFilter = useMemo(() => {
     const parts = [];
     if (colorAdjust.brightness !== 0) parts.push(`brightness(${1 + colorAdjust.brightness})`);
@@ -128,8 +152,8 @@ export default function App() {
   }, [colorAdjust, activeFilter]);
 
   const clipIndex = useMemo(() => {
-    if (!timeline?.clips?.length) return null;
-    const clips = timeline.clips;
+    if (!effectiveClips?.length) return null;
+    const clips = effectiveClips;
     return {
       clips,
       mediaStart: clips.map((c) => c.start),
@@ -137,7 +161,7 @@ export default function App() {
       timelineStart: clips.map((c) => c.timelineStart),
       timelineEnd: clips.map((c) => c.timelineStart + c.displayDuration),
     };
-  }, [timeline]);
+  }, [effectiveClips]);
 
   const findClipByMediaTime = (time) => {
     if (!clipIndex) return null;
@@ -434,8 +458,13 @@ export default function App() {
     setActiveClipId(clip.id);
     setActiveClipState(clip);
     activeClipRef.current = clip;
-    endTimeRef.current = clip.end;
-    videoRef.current.currentTime = clip.start;
+
+    // 兼容 Draft segment 和 Timeline clip
+    const sourceStart = clip.sourceStart ?? clip.start;
+    const sourceEnd = clip.sourceEnd ?? clip.end;
+
+    endTimeRef.current = sourceEnd;
+    videoRef.current.currentTime = sourceStart;
     videoRef.current.playbackRate = clip.playbackRate || 1;
     videoRef.current.volume = clip.volume ?? 1;
     videoRef.current.play();
@@ -446,13 +475,13 @@ export default function App() {
       audioRef.current.play().catch(err => console.warn('[BGM] Play failed:', err));
     }
 
-    playheadTimeRef.current = clip.start;
-    setPlayheadTime(clip.start);
+    playheadTimeRef.current = sourceStart;
+    setPlayheadTime(sourceStart);
   };
 
   // 转换函数：素材时间 -> 轨道时间
   const mediaToTimeline = (mTime) => {
-    if (!timeline || !timeline.clips) return mTime;
+    if (!effectiveClips || !effectiveClips.length) return mTime;
     const clip = findClipByMediaTime(mTime);
     if (!clip) {
       // 如果不在任何 clip 中，返回 effectiveDuration（已播放完毕）
@@ -464,7 +493,7 @@ export default function App() {
 
   // 转换函数：轨道时间 -> 素材时间
   const timelineToMedia = (tTime) => {
-    if (!timeline || !timeline.clips) return tTime;
+    if (!effectiveClips || !effectiveClips.length) return tTime;
     const clip = findClipByTimelineTime(tTime);
     if (!clip) return tTime;
     const offsetInTimeline = tTime - clip.timelineStart;
@@ -475,11 +504,11 @@ export default function App() {
     if (!videoRef.current) return;
     const currentTime = videoRef.current.currentTime;
     latestTimeRef.current = currentTime;
-    
+
     // 动态倍率同步逻辑
-    if (timeline && timeline.clips) {
+    if (effectiveClips && effectiveClips.length) {
       const currentClip = findClipByMediaTime(currentTime);
-      
+
       if (currentClip) {
         const targetRate = currentClip.playbackRate || 1;
         if (videoRef.current.playbackRate !== targetRate) {
@@ -509,8 +538,8 @@ export default function App() {
         activeClipRef.current = null;
 
         // 处于两个 clip 之间的间隙 — 播放中则跳到下一个 clip
-        if (!videoRef.current.paused && timeline?.clips?.length) {
-          const nextClip = timeline.clips.find(c => c.start > currentTime + 0.01);
+        if (!videoRef.current.paused && effectiveClips?.length) {
+          const nextClip = effectiveClips.find(c => c.start > currentTime + 0.01);
           if (nextClip) {
             videoRef.current.currentTime = nextClip.start;
           } else {
@@ -571,8 +600,8 @@ export default function App() {
       // 检查视频是否已播放到最后
       if (playheadTime >= effectiveDuration - 0.1) {
         // 回到开头
-        if (timeline && timeline.clips && timeline.clips.length > 0) {
-          videoRef.current.currentTime = timeline.clips[0].start;
+        if (effectiveClips && effectiveClips.length > 0) {
+          videoRef.current.currentTime = effectiveClips[0].start;
         } else {
           videoRef.current.currentTime = 0;
         }
@@ -585,7 +614,7 @@ export default function App() {
         }
       }
 
-      if (timeline && timeline.clips) {
+      if (effectiveClips && effectiveClips.length) {
         const currentTime = videoRef.current.currentTime;
         const currentClip = findClipByMediaTime(currentTime);
         if (currentClip) {
@@ -918,13 +947,13 @@ export default function App() {
   });
 
   const getActiveClip = () => {
-    if (!timeline?.clips?.length) return null;
-    const byId = timeline.clips.find((clip) => clip.id === activeClipId);
+    if (!effectiveClips?.length) return null;
+    const byId = effectiveClips.find((clip) => clip.id === activeClipId);
     if (byId) return byId;
     const time = videoRef.current?.currentTime ?? 0;
     return (
-      timeline.clips.find((clip) => time >= clip.start - 0.05 && time <= clip.end + 0.05) ||
-      timeline.clips[0] ||
+      effectiveClips.find((clip) => time >= clip.start - 0.05 && time <= clip.end + 0.05) ||
+      effectiveClips[0] ||
       null
     );
   };
@@ -1717,7 +1746,55 @@ export default function App() {
             <div className="track track-v1">
               <div className="track-id">V1</div>
               <div className="track-content">
-                {timeline && timeline.clips && timeline.clips.length > 0 ? (
+                {draft && draft.tracks ? (
+                  (() => {
+                    const videoTrack = draft.tracks.find(t => t.type === "video");
+                    if (!videoTrack || !videoTrack.segments) return null;
+
+                    return videoTrack.segments.map((seg, i) => {
+                      // Trim preview: check if this segment is being dragged
+                      const drag = trimDragRef.current;
+                      let displayStart = seg.timelineStart;
+                      let displayDur = seg.timelineDuration;
+                      if (drag?.active && drag.clip.id === seg.id && drag.pendingTime !== null) {
+                        if (drag.edge === "start") {
+                          const delta = (drag.pendingTime - seg.sourceStart) / (seg.playbackRate || 1);
+                          displayStart = seg.timelineStart + delta;
+                          displayDur = seg.timelineDuration - delta;
+                        } else {
+                          displayDur = (drag.pendingTime - seg.sourceStart) / (seg.playbackRate || 1);
+                        }
+                      }
+                      return (
+                      <div
+                        key={seg.id}
+                        className={`video-clip-segment ${activeClipId === seg.id ? "active" : ""}`}
+                        style={{
+                          left: `${(displayStart / effectiveDuration) * 100}%`,
+                          width: `${(displayDur / effectiveDuration) * 100}%`,
+                          opacity: seg.playbackRate !== 1 ? 0.85 : 1,
+                        }}
+                        onClick={() => { if (!scrubMovedRef.current) handleClipPlay(seg); }}
+                      >
+                        <div className="trim-handle trim-handle-left" onMouseDown={(e) => handleTrimHandleStart(e, seg, "start")} />
+                        <div className="clip-thumb-overlay">
+                          {thumbnails.length > 0 ? (
+                            thumbnails
+                              .filter(t => t.time >= seg.sourceStart - 0.5 && t.time <= seg.sourceEnd + 0.5)
+                              .slice(0, 5)
+                              .map((t, idx) => <img key={idx} src={t.image} alt="" />)
+                          ) : null}
+                        </div>
+                        {seg.playbackRate && seg.playbackRate !== 1 && (
+                          <div className="clip-speed-tag">⚡ {seg.playbackRate}x</div>
+                        )}
+                        <div className="clip-label">{`Clip ${i + 1}`}</div>
+                        <div className="trim-handle trim-handle-right" onMouseDown={(e) => handleTrimHandleStart(e, seg, "end")} />
+                      </div>
+                      );
+                    });
+                  })()
+                ) : timeline && timeline.clips && timeline.clips.length > 0 ? (
                   timeline.clips.map((clip, i) => {
                     // Trim preview: check if this clip is being dragged
                     const drag = trimDragRef.current;
@@ -1817,7 +1894,26 @@ export default function App() {
             <div className="track track-t1">
               <div className="track-id">T1</div>
               <div className="track-content">
-                {timeline?.textEdits?.map((edit, i) => {
+                {draft && draft.tracks ? (
+                  (() => {
+                    const textTrack = draft.tracks.find(t => t.type === "text");
+                    if (!textTrack || !textTrack.segments) return null;
+
+                    return textTrack.segments.map((seg, i) => (
+                      <div
+                        key={seg.id}
+                        className="text-edit-node"
+                        style={{
+                          left: `${(seg.timelineStart / effectiveDuration) * 100}%`,
+                          width: `${(seg.timelineDuration / effectiveDuration) * 100}%`,
+                        }}
+                        title={seg.content}
+                      >
+                        T: {seg.content}
+                      </div>
+                    ));
+                  })()
+                ) : timeline?.textEdits?.map((edit, i) => {
                   const tDuration = timeline.totalTimelineDuration || duration;
                   return (
                     <div
@@ -1839,7 +1935,26 @@ export default function App() {
             <div className="track track-fade">
               <div className="track-id">FX</div>
               <div className="track-content">
-                {timeline?.fadeEdits?.map((edit, i) => {
+                {draft && draft.tracks ? (
+                  (() => {
+                    const effectTrack = draft.tracks.find(t => t.type === "effect");
+                    if (!effectTrack || !effectTrack.segments) return null;
+
+                    return effectTrack.segments.map((seg, i) => (
+                      <div
+                        key={seg.id}
+                        className={`fade-edit-node fade-${seg.direction}`}
+                        style={{
+                          left: `${(seg.timelineStart / effectiveDuration) * 100}%`,
+                          width: `${(seg.timelineDuration / effectiveDuration) * 100}%`,
+                        }}
+                        title={`淡${seg.direction === "in" ? "入" : "出"}`}
+                      >
+                        {seg.direction === "in" ? "▶ 淡入" : "淡出 ◀"}
+                      </div>
+                    ));
+                  })()
+                ) : timeline?.fadeEdits?.map((edit, i) => {
                   const tDuration = timeline.totalTimelineDuration || duration;
                   return (
                     <div

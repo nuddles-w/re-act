@@ -35,11 +35,21 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgre
   const videoTrack = createTrack(TrackType.VIDEO, "V1");
   draft.tracks.push(videoTrack);
 
-  // 转换 segments（AI 推荐的视频片段）
-  if (aiOutput.segments && aiOutput.segments.length > 0) {
+  const edits = aiOutput.edits || [];
+  const speedEdits = edits.filter(e => e.type === "speed");
+  const deleteEdits = edits.filter(e => e.type === "delete");
+  const textEdits = edits.filter(e => e.type === "text");
+  const fadeEdits = edits.filter(e => e.type === "fade");
+  const bgmEdits = edits.filter(e => e.type === "bgm");
+
+  // 决定视频片段的构建策略
+  const hasStructuralEdits = deleteEdits.length > 0 || speedEdits.length > 0;
+
+  if (aiOutput.segments && aiOutput.segments.length > 0 && !hasStructuralEdits) {
+    // AI 返回了精选片段，且没有结构性编辑，直接使用
     convertSegmentsToDraft(aiOutput.segments, videoTrack, sourceId, videoSource.duration);
   } else {
-    // 如果没有 segments，创建一个完整视频片段
+    // 从完整视频开始，应用 delete 和 speed edits
     const fullSegment = createVideoSegment({
       sourceId,
       timelineStart: 0,
@@ -49,12 +59,20 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgre
       playbackRate: 1.0,
     });
     videoTrack.segments.push(fullSegment);
+
+    // 先应用 delete edits（删除片段）
+    deleteEdits.forEach(edit => {
+      applyDeleteEditToSegments(videoTrack, edit);
+    });
+
+    // 再应用 speed edits（调整速度）
+    speedEdits.forEach(edit => {
+      applySpeedEditToSegments(videoTrack, edit);
+    });
   }
 
-  // 转换 edits（各种编辑操作）
-  if (aiOutput.edits && aiOutput.edits.length > 0) {
-    await convertEditsToDraft(aiOutput.edits, draft, videoTrack, sessionId, onProgress);
-  }
+  // 处理文字和特效（需要 mediaTime → timelineTime 转换）
+  await convertNonStructuralEdits(draft, videoTrack, textEdits, fadeEdits, bgmEdits, sessionId, onProgress);
 
   // 更新总时长
   updateDraftDuration(draft);
@@ -91,60 +109,21 @@ function convertSegmentsToDraft(segments, videoTrack, sourceId, totalDuration) {
 }
 
 /**
- * 转换 edits 到对应的轨道
+ * 处理文字、特效、BGM（需要 mediaTime → timelineTime 转换）
  */
-async function convertEditsToDraft(edits, draft, videoTrack, sessionId, onProgress) {
-  const textEdits = edits.filter(e => e.type === "text");
-  const fadeEdits = edits.filter(e => e.type === "fade");
-  const speedEdits = edits.filter(e => e.type === "speed");
-  const deleteEdits = edits.filter(e => e.type === "delete");
-  const bgmEdits = edits.filter(e => e.type === "bgm");
-
-  // 处理背景音乐（放在最前面，让音频轨道显示在上方）
-  if (bgmEdits.length > 0) {
-    const audioTrack = createTrack(TrackType.AUDIO, "A1");
-    draft.tracks.push(audioTrack);
-
-    // 计算剪辑后的总时长（所有视频片段的 timeline 时长之和）
-    const totalTimelineDuration = videoTrack.segments.reduce((sum, seg) => sum + seg.timelineDuration, 0);
-
-    // 立即下载 BGM
-    for (const edit of bgmEdits) {
-      try {
-        onProgress?.(`🎵 正在下载背景音乐...`);
-        console.log(`[aiToDraft] Downloading BGM with keywords: "${edit.keywords}"`);
-        const bgm = await searchAndDownloadBgm(edit.keywords, sessionId || `bgm-${Date.now()}`);
-        console.log(`[aiToDraft] BGM downloaded: ${bgm.title} - ${bgm.artist} (${bgm.path})`);
-        onProgress?.(`✅ 背景音乐已下载: ${bgm.title}`);
-
-        audioTrack.segments.push({
-          id: `seg-a-bgm-${Date.now()}`,
-          type: "audio",
-          sourceFile: bgm.path, // 保存下载的文件路径
-          timelineStart: 0,
-          timelineDuration: totalTimelineDuration,
-          volume: edit.volume || 0.3,
-          metadata: {
-            title: bgm.title,
-            artist: bgm.artist,
-            keywords: edit.keywords,
-          },
-        });
-      } catch (error) {
-        console.error(`[aiToDraft] Failed to download BGM: ${error.message}`);
-        // BGM 下载失败不阻断流程，只记录占位符
-        audioTrack.segments.push({
-          id: `seg-a-bgm-${Date.now()}`,
-          type: "bgm",
-          keywords: edit.keywords,
-          volume: edit.volume || 0.3,
-          timelineStart: 0,
-          timelineDuration: totalTimelineDuration,
-          error: error.message,
-        });
+async function convertNonStructuralEdits(draft, videoTrack, textEdits, fadeEdits, bgmEdits, sessionId, onProgress) {
+  // 构建 mediaTime → timelineTime 映射函数
+  const mediaToTimeline = (mediaTime) => {
+    let timelineTime = 0;
+    for (const seg of videoTrack.segments) {
+      if (mediaTime >= seg.sourceStart && mediaTime <= seg.sourceEnd) {
+        const offset = mediaTime - seg.sourceStart;
+        return seg.timelineStart + offset / seg.playbackRate;
       }
+      if (mediaTime < seg.sourceStart) break;
     }
-  }
+    return timelineTime;
+  };
 
   // 处理文字编辑
   if (textEdits.length > 0) {
@@ -152,9 +131,12 @@ async function convertEditsToDraft(edits, draft, videoTrack, sessionId, onProgre
     draft.tracks.push(textTrack);
 
     textEdits.forEach(edit => {
+      const timelineStart = mediaToTimeline(edit.start);
+      const timelineEnd = mediaToTimeline(edit.end);
+
       const textSegment = createTextSegment({
-        timelineStart: edit.start,
-        timelineDuration: edit.end - edit.start,
+        timelineStart,
+        timelineDuration: timelineEnd - timelineStart,
         content: edit.text,
         style: {
           fontSize: 48,
@@ -174,25 +156,61 @@ async function convertEditsToDraft(edits, draft, videoTrack, sessionId, onProgre
     draft.tracks.push(effectTrack);
 
     fadeEdits.forEach(edit => {
+      const timelineStart = mediaToTimeline(edit.start);
+      const timelineEnd = mediaToTimeline(edit.end);
+
       const fadeSegment = createFadeSegment({
-        timelineStart: edit.start,
-        timelineDuration: edit.end - edit.start,
-        direction: edit.direction, // "in" | "out"
+        timelineStart,
+        timelineDuration: timelineEnd - timelineStart,
+        direction: edit.direction,
         targetTrack: "V1",
       });
       effectTrack.segments.push(fadeSegment);
     });
   }
 
-  // 处理速度调整（应用到视频片段）
-  speedEdits.forEach(edit => {
-    applySpeedEditToSegments(videoTrack, edit);
-  });
+  // 处理背景音乐
+  if (bgmEdits.length > 0) {
+    const audioTrack = createTrack(TrackType.AUDIO, "A1");
+    draft.tracks.push(audioTrack);
 
-  // 处理删除操作（从视频轨道移除片段）
-  deleteEdits.forEach(edit => {
-    applyDeleteEditToSegments(videoTrack, edit);
-  });
+    const totalTimelineDuration = videoTrack.segments.reduce((sum, seg) => sum + seg.timelineDuration, 0);
+
+    for (const edit of bgmEdits) {
+      try {
+        onProgress?.(`🎵 正在下载背景音乐...`);
+        console.log(`[aiToDraft] Downloading BGM with keywords: "${edit.keywords}"`);
+        const bgm = await searchAndDownloadBgm(edit.keywords, sessionId || `bgm-${Date.now()}`);
+        console.log(`[aiToDraft] BGM downloaded: ${bgm.title} - ${bgm.artist} (${bgm.path})`);
+        onProgress?.(`✅ 背景音乐已下载: ${bgm.title}`);
+
+        audioTrack.segments.push({
+          id: `seg-a-bgm-${Date.now()}`,
+          type: "audio",
+          sourceFile: bgm.path,
+          timelineStart: 0,
+          timelineDuration: totalTimelineDuration,
+          volume: edit.volume || 0.3,
+          metadata: {
+            title: bgm.title,
+            artist: bgm.artist,
+            keywords: edit.keywords,
+          },
+        });
+      } catch (error) {
+        console.error(`[aiToDraft] Failed to download BGM: ${error.message}`);
+        audioTrack.segments.push({
+          id: `seg-a-bgm-${Date.now()}`,
+          type: "bgm",
+          keywords: edit.keywords,
+          volume: edit.volume || 0.3,
+          timelineStart: 0,
+          timelineDuration: totalTimelineDuration,
+          error: error.message,
+        });
+      }
+    }
+  }
 }
 
 /**
@@ -200,21 +218,88 @@ async function convertEditsToDraft(edits, draft, videoTrack, sessionId, onProgre
  */
 function applySpeedEditToSegments(videoTrack, speedEdit) {
   const { start, end, rate } = speedEdit;
+  const newSegments = [];
 
   videoTrack.segments.forEach(segment => {
-    // 检查片段是否在速度调整范围内
     const segStart = segment.sourceStart;
     const segEnd = segment.sourceEnd;
 
+    // 完全在范围外，保持不变
+    if (segEnd <= start || segStart >= end) {
+      newSegments.push(segment);
+      return;
+    }
+
+    // 完全在范围内，调整速度
     if (segStart >= start && segEnd <= end) {
-      // 完全在范围内，直接调整速度
       segment.playbackRate = rate;
       segment.timelineDuration = (segEnd - segStart) / rate;
-    } else if (segStart < end && segEnd > start) {
-      // 部分重叠，需要分割（这里简化处理，实际应该分割片段）
-      console.warn(`[aiToDraft] Speed edit overlaps with segment, skipping split`);
+      newSegments.push(segment);
+      return;
+    }
+
+    // 部分重叠，需要分割
+    if (segStart < start && segEnd > start) {
+      // 分割：前半部分保持原速
+      newSegments.push(createVideoSegment({
+        sourceId: segment.sourceId,
+        timelineStart: 0, // 稍后重新计算
+        timelineDuration: start - segStart,
+        sourceStart: segStart,
+        sourceEnd: start,
+        playbackRate: segment.playbackRate,
+        volume: segment.volume,
+      }));
+
+      // 后半部分应用新速度
+      const overlapEnd = Math.min(segEnd, end);
+      newSegments.push(createVideoSegment({
+        sourceId: segment.sourceId,
+        timelineStart: 0,
+        timelineDuration: (overlapEnd - start) / rate,
+        sourceStart: start,
+        sourceEnd: overlapEnd,
+        playbackRate: rate,
+        volume: segment.volume,
+      }));
+
+      // 如果还有剩余部分
+      if (segEnd > end) {
+        newSegments.push(createVideoSegment({
+          sourceId: segment.sourceId,
+          timelineStart: 0,
+          timelineDuration: segEnd - end,
+          sourceStart: end,
+          sourceEnd: segEnd,
+          playbackRate: segment.playbackRate,
+          volume: segment.volume,
+        }));
+      }
+    } else if (segStart < end && segEnd > end) {
+      // 只有后半部分重叠
+      newSegments.push(createVideoSegment({
+        sourceId: segment.sourceId,
+        timelineStart: 0,
+        timelineDuration: (end - segStart) / rate,
+        sourceStart: segStart,
+        sourceEnd: end,
+        playbackRate: rate,
+        volume: segment.volume,
+      }));
+
+      newSegments.push(createVideoSegment({
+        sourceId: segment.sourceId,
+        timelineStart: 0,
+        timelineDuration: segEnd - end,
+        sourceStart: end,
+        sourceEnd: segEnd,
+        playbackRate: segment.playbackRate,
+        volume: segment.volume,
+      }));
     }
   });
+
+  videoTrack.segments = newSegments;
 
   // 重新计算 timelineStart
   let currentTime = 0;
@@ -229,24 +314,53 @@ function applySpeedEditToSegments(videoTrack, speedEdit) {
  */
 function applyDeleteEditToSegments(videoTrack, deleteEdit) {
   const { start, end } = deleteEdit;
+  const newSegments = [];
 
-  // 过滤掉在删除范围内的片段
-  videoTrack.segments = videoTrack.segments.filter(segment => {
+  videoTrack.segments.forEach(segment => {
     const segStart = segment.sourceStart;
     const segEnd = segment.sourceEnd;
 
-    // 完全在删除范围内，移除
+    // 完全在删除范围外，保留
+    if (segEnd <= start || segStart >= end) {
+      newSegments.push(segment);
+      return;
+    }
+
+    // 完全在删除范围内，丢弃
     if (segStart >= start && segEnd <= end) {
-      return false;
+      return;
     }
 
-    // 部分重叠，需要裁剪（这里简化处理）
-    if (segStart < end && segEnd > start) {
-      console.warn(`[aiToDraft] Delete edit overlaps with segment, keeping segment`);
+    // 部分重叠，裁剪
+    if (segStart < start && segEnd > start) {
+      // 保留前半部分
+      const newEnd = Math.min(segEnd, start);
+      newSegments.push(createVideoSegment({
+        sourceId: segment.sourceId,
+        timelineStart: 0,
+        timelineDuration: (newEnd - segStart) / segment.playbackRate,
+        sourceStart: segStart,
+        sourceEnd: newEnd,
+        playbackRate: segment.playbackRate,
+        volume: segment.volume,
+      }));
     }
 
-    return true;
+    if (segStart < end && segEnd > end) {
+      // 保留后半部分
+      newSegments.push(createVideoSegment({
+        sourceId: segment.sourceId,
+        timelineStart: 0,
+        timelineDuration: (segEnd - end) / segment.playbackRate,
+        sourceStart: end,
+        sourceEnd: segEnd,
+        playbackRate: segment.playbackRate,
+        volume: segment.volume,
+      }));
+    }
   });
+
+  videoTrack.segments = newSegments;
 
   // 重新计算 timelineStart
   let currentTime = 0;

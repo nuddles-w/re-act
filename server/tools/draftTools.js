@@ -95,6 +95,16 @@ async function executeAddSegment(args, sessionId, draftManager) {
     throw new Error("segment must have timelineStart and timelineDuration");
   }
 
+  // 确保 segment 有 type 字段
+  if (!segment.type) {
+    // 根据 trackId 推断类型
+    const trackType = trackId.charAt(0).toLowerCase();
+    if (trackType === 'v') segment.type = 'video';
+    else if (trackType === 'a') segment.type = 'audio';
+    else if (trackType === 't') segment.type = 'text';
+    else if (trackType === 'f') segment.type = 'fade';
+  }
+
   // 如果没有 id，生成一个
   if (!segment.id) {
     const trackType = trackId.charAt(0);

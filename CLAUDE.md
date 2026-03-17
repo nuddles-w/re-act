@@ -76,6 +76,52 @@ User request + video file
 - AI 自主判断何时需要读取 Draft
 - 支持相对指令（"再快一点"）和指代消解（"把刚才那个删掉"）
 
+**⚠️ 增量更新范式（所有新功能必须遵循）：**
+
+1. **首次会话初始化**：
+   - 只在 `!existingSession` 时初始化 Draft
+   - 如果 AI 输出传统 edits，调用 `aiOutputToDraft()` 转换（向后兼容）
+   - 如果 AI 使用 Draft 工具，Draft 已在工具执行时更新
+
+2. **多轮对话增量更新**：
+   - ❌ 禁止每次调用 `aiOutputToDraft()` + `replace_draft` 覆盖
+   - ✅ AI 必须通过 Draft 工具进行增量操作：
+     - `read_draft()` - 读取当前状态
+     - `add_segment()` - 添加新片段
+     - `modify_segment()` - 修改现有片段
+     - `delete_segment()` - 删除片段
+   - ✅ 每次只操作用户本轮要求的内容，保留之前的编辑
+
+3. **标准轨道 ID**：
+   - `V1` - 视频轨道
+   - `A1` - 音频轨道
+   - `T1` - 文字轨道
+   - `FX1` - 效果轨道
+   - DraftManager 会自动初始化这些轨道
+
+4. **实现新功能时的检查清单**：
+   - [ ] 是否会覆盖现有 Draft？如果是，改为增量操作
+   - [ ] 是否需要读取现有状态？使用 `read_draft()`
+   - [ ] 是否在多轮对话中保留之前的编辑？
+   - [ ] AI prompt 是否明确要求增量更新？
+   - [ ] 是否测试了连续对话场景？
+
+5. **反模式（禁止）**：
+   ```javascript
+   // ❌ 错误：每次都替换整个 Draft
+   const draft = await aiOutputToDraft(result.features, ...);
+   draftManager.updateDraft(sessionId, { type: "replace_draft", data: { draft } });
+
+   // ✅ 正确：首次初始化 + 多轮增量
+   if (!existingSession) {
+     // 首次：可以使用 replace_draft
+   } else {
+     // 多轮：AI 通过工具操作，无需手动处理
+   }
+   ```
+
+**参考实现**：详见 `docs/draft-incremental-update-fix.md`
+
 **关键文件：**
 - `src/domain/draftModel.js` - Draft 数据模型
 - `server/draftManager.js` - 状态管理器（单例）

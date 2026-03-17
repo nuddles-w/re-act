@@ -104,11 +104,17 @@ fade_out(start: number, duration: number)
 add_bgm(keywords: string, volume?: number)
 
 决策原则：
-- 首次分析：使用传统工具输出 edits，系统会自动转换为 draft
-- 多轮修改：先 read_draft 了解当前状态，再使用 add/modify/delete_segment 精确操作
+- **首次分析**：可以使用传统工具输出 edits（系统会自动转换），或直接使用 Draft 工具
+- **多轮修改**：必须先 read_draft 了解当前状态，再使用 add/modify/delete_segment 精确操作
+- **增量更新**：每次只操作用户本轮要求的内容，不要重新生成整个编辑方案
 - 制作集锦 / 只保留某些片段 → 将要保留的片段输出到 segments 数组
 - 结构性编辑（时间已知）→ 直接在 final_answer 中输出 edits
 - 需要根据画面内容定位片段 → 先调用 analyze_video，再根据返回的 events 决策
+
+**多轮对话重要提示**：
+- ✅ 用户的每次请求都是在现有编辑基础上的增量修改
+- ✅ 使用 read_draft 查看当前状态，然后只修改/添加用户要求的部分
+- ❌ 不要重新生成完整的 segments/edits，这会覆盖之前的所有编辑
 
 **重要约束**：
 - ❌ 不要主动添加用户未明确要求的功能（如背景音乐、文字、特效等）
