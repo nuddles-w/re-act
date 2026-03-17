@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { defaultIntent } from "./domain/models.js";
 import { extractFeaturesFromVideo } from "./domain/featureExtractor.js";
-import { buildTimeline } from "./domain/strategyEngine.js";
-import { applyEditsToTimeline } from "./domain/applyEditsToTimeline.js";
 
 const formatTime = (value) => {
   const minutes = Math.floor(value / 60);
@@ -20,8 +18,7 @@ export default function App() {
   const [duration, setDuration] = useState(0);
   const [features, setFeatures] = useState(null);
   const [intent, setIntent] = useState(defaultIntent);
-  const [timeline, setTimeline] = useState(null);
-  const [draft, setDraft] = useState(null); // 新增：Draft 状态
+  const [draft, setDraft] = useState(null); // Draft 是唯一数据源
   const [bgmUrl, setBgmUrl] = useState(null); // 新增：BGM 文件 URL
   const [bgmVolume, setBgmVolume] = useState(0.3);
   const [activeClipId, setActiveClipId] = useState(null);
@@ -103,16 +100,18 @@ export default function App() {
   const [thumbnails, setThumbnails] = useState([]);
   const [thumbnailStatus, setThumbnailStatus] = useState("idle");
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
+  // 合并所有编辑（从 Draft 派生 + 手动编辑）
   const combinedEdits = useMemo(
-    () => [...(features?.edits || []), ...manualEdits],
-    [features, manualEdits]
+    () => [...effectiveTextEdits, ...effectiveFadeEdits, ...manualEdits],
+    [effectiveTextEdits, effectiveFadeEdits, manualEdits]
   );
   // 统一获取时长：优先 Draft，其次 Timeline，最后原始视频
+  // 从 Draft 派生所有数据
   const effectiveDuration = useMemo(() => {
-    return draft?.settings?.totalDuration || timeline?.totalTimelineDuration || duration;
-  }, [draft, timeline, duration]);
+    return draft?.settings?.totalDuration || duration;
+  }, [draft, duration]);
 
-  // 统一获取视频片段：优先 Draft，fallback 到 Timeline
+  // 统一获取视频片段：从 Draft 读取
   const effectiveClips = useMemo(() => {
     if (draft && draft.tracks) {
       const videoTrack = draft.tracks.find(t => t.type === "video");
@@ -131,12 +130,77 @@ export default function App() {
           sourceEnd: seg.sourceEnd,
           timelineDuration: seg.timelineDuration,
         }));
-        console.log('[effectiveClips] from Draft:', clips.map(c => ({ id: c.id, volume: c.volume })));
+        console.log('[effectiveClips] from Draft:', clips.length, 'clips');
         return clips;
       }
     }
-    return timeline?.clips || [];
-  }, [draft, timeline]);
+    // 如果没有 Draft，返回完整视频作为单个 clip
+    if (duration > 0) {
+      console.log('[effectiveClips] fallback to full video');
+      return [{
+        id: "full-video",
+        start: 0,
+        end: duration,
+        timelineStart: 0,
+        displayDuration: duration,
+        playbackRate: 1.0,
+        volume: 1.0,
+        sourceStart: 0,
+        sourceEnd: duration,
+        timelineDuration: duration,
+      }];
+    }
+    return [];
+  }, [draft, duration]);
+
+  // 从 Draft 获取文字编辑
+  const effectiveTextEdits = useMemo(() => {
+    if (!draft || !draft.tracks) return [];
+    const textTrack = draft.tracks.find(t => t.type === "text");
+    if (!textTrack || !textTrack.segments) return [];
+
+    return textTrack.segments.map(seg => ({
+      type: "text",
+      start: seg.timelineStart,
+      end: seg.timelineStart + seg.timelineDuration,
+      timelineStart: seg.timelineStart,
+      timelineEnd: seg.timelineStart + seg.timelineDuration,
+      text: seg.content,
+      position: seg.style?.position || "bottom",
+      style: seg.style,
+    }));
+  }, [draft]);
+
+  // 从 Draft 获取淡入淡出效果
+  const effectiveFadeEdits = useMemo(() => {
+    if (!draft || !draft.tracks) return [];
+    const effectTrack = draft.tracks.find(t => t.type === "effect");
+    if (!effectTrack || !effectTrack.segments) return [];
+
+    return effectTrack.segments
+      .filter(seg => seg.effectType === "fade")
+      .map(seg => ({
+        type: "fade",
+        start: seg.timelineStart,
+        end: seg.timelineStart + seg.timelineDuration,
+        mode: seg.direction, // "in" or "out"
+        direction: seg.direction,
+      }));
+  }, [draft]);
+
+  // 从 Draft 获取 BGM
+  const effectiveBgmEdits = useMemo(() => {
+    if (!draft || !draft.tracks) return [];
+    const audioTrack = draft.tracks.find(t => t.type === "audio");
+    if (!audioTrack || !audioTrack.segments) return [];
+
+    return audioTrack.segments.map(seg => ({
+      type: "bgm",
+      keywords: seg.keywords || "",
+      volume: seg.volume || 0.3,
+      filePath: seg.filePath,
+    }));
+  }, [draft]);
 
   const computedFilter = useMemo(() => {
     const parts = [];
@@ -294,54 +358,8 @@ export default function App() {
     };
   }, [videoUrl]);
 
-  useEffect(() => {
-    if (!duration) return;
-    let baseTimeline;
-
-    // 如果有 delete edits，从完整视频开始应用（避免 segments 和 delete 区间不匹配）
-    const hasDeleteEdits = combinedEdits.some(e => e?.type === "delete");
-
-    if (features && !hasDeleteEdits) {
-      // AI 分析完成且无 delete edits：根据 features 构建多段时间线
-      baseTimeline = buildTimeline(features, intent);
-    } else {
-      // 未进行 AI 分析或有 delete edits：从完整视频开始
-      baseTimeline = {
-        clips: [{ id: "base-clip", start: 0, end: duration, duration, energy: 0.5, label: "Original Video", reason: "完整视频" }],
-        totalDuration: duration,
-        targetDuration: duration,
-      };
-    }
-    const result = applyEditsToTimeline(baseTimeline, combinedEdits, duration);
-    setTimeline(result);
-
-    // 回传 timeline 构建结果到后端日志
-    fetch(`${apiBase}/api/log`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        context: "timeline-build",
-        message: "timeline constructed",
-        data: {
-          baseClips: baseTimeline.clips.map(c => ({ id: c.id, start: c.start, end: c.end, dur: c.duration })),
-          resultClips: result.clips.map(c => ({ id: c.id, start: c.start, end: c.end, timelineStart: c.timelineStart, displayDuration: c.displayDuration, playbackRate: c.playbackRate })),
-          totalTimelineDuration: result.totalTimelineDuration,
-          videoDuration: duration,
-          textEdits: result.textEdits,
-          fadeEdits: result.fadeEdits,
-        },
-      }),
-    }).catch(() => {});
-  }, [features, intent, duration, combinedEdits, file]);
-
-  // timeline 变化后，用当前 media time 重新计算 playhead 位置
-  useEffect(() => {
-    if (!timeline || !videoRef.current) return;
-    const currentMediaTime = videoRef.current.currentTime;
-    const newPlayhead = mediaToTimeline(currentMediaTime);
-    playheadTimeRef.current = newPlayhead;
-    setPlayheadTime(newPlayhead);
-  }, [timeline]);
+  // 移除旧的 timeline 构建逻辑，Draft 是唯一数据源
+  // 旧的 buildTimeline + applyEditsToTimeline 逻辑已删除
 
   useEffect(() => {
     if (!videoUrl || !duration) {
@@ -416,7 +434,7 @@ export default function App() {
     setVideoUrl(URL.createObjectURL(nextFile));
     setDuration(0);
     setFeatures(null);
-    setTimeline(null);
+    setDraft(null);
     setActiveClipId(null);
     setPrepareId(null);
     setPrepareStatus("idle");
@@ -657,7 +675,7 @@ export default function App() {
     const percentage = Math.max(0, Math.min(1, x / totalWidth));
 
     const targetTimelineTime = percentage * effectiveDuration;
-    const targetMediaTime = timeline?.totalTimelineDuration ? timelineToMedia(targetTimelineTime) : targetTimelineTime;
+    const targetMediaTime = timelineToMedia(targetTimelineTime);
 
     videoRef.current.currentTime = targetMediaTime;
 
@@ -1286,14 +1304,15 @@ export default function App() {
   };
 
   const handleExport = async () => {
-    if (!timeline || !file) return;
+    if (!draft || !file) return;
     setIsExporting(true);
     setExportProgress({ status: "rendering", percent: 0, message: "准备中..." });
 
     try {
       const formData = new FormData();
       formData.append("video", file);
-      formData.append("timeline", JSON.stringify(timeline));
+      formData.append("draft", JSON.stringify(draft));
+      formData.append("sessionId", sessionId || "");
       formData.append("colorAdjust", JSON.stringify(colorAdjust));
       formData.append("activeFilter", activeFilter);
       formData.append("exportFormat", exportFormat);
@@ -1370,9 +1389,9 @@ export default function App() {
         </div>
         <div className="header-right">
           <button 
-            className={`btn-export ${isExporting ? 'exporting' : ''}`} 
-            onClick={handleExport} 
-            disabled={!timeline || isExporting}
+            className={`btn-export ${isExporting ? 'exporting' : ''}`}
+            onClick={handleExport}
+            disabled={!draft || isExporting}
           >
             {isExporting ? "Exporting..." : "Export"}
           </button>
@@ -1500,7 +1519,7 @@ export default function App() {
                     {videoRef.current.playbackRate}x
                   </div>
                 )}
-                {videoArea && timeline?.textEdits?.map((edit, i) => {
+                {videoArea && effectiveTextEdits?.map((edit, i) => {
                   const isActive = playheadTime >= edit.timelineStart - 0.05 && playheadTime <= edit.timelineEnd + 0.05;
                   if (!isActive) return null;
 
@@ -1811,8 +1830,8 @@ export default function App() {
                       );
                     });
                   })()
-                ) : timeline && timeline.clips && timeline.clips.length > 0 ? (
-                  timeline.clips.map((clip, i) => {
+                ) : effectiveClips && effectiveClips.length > 0 ? (
+                  effectiveClips.map((clip, i) => {
                     // Trim preview: check if this clip is being dragged
                     const drag = trimDragRef.current;
                     let displayStart = clip.timelineStart;
@@ -1831,8 +1850,8 @@ export default function App() {
                       key={clip.id}
                       className={`video-clip-segment ${activeClipId === clip.id ? "active" : ""}`}
                       style={{
-                        left: `${(displayStart / timeline.totalTimelineDuration) * 100}%`,
-                        width: `${(displayDur / timeline.totalTimelineDuration) * 100}%`,
+                        left: `${(displayStart / effectiveDuration) * 100}%`,
+                        width: `${(displayDur / effectiveDuration) * 100}%`,
                         opacity: clip.playbackRate !== 1 ? 0.85 : 1,
                       }}
                       onClick={() => { if (!scrubMovedRef.current) handleClipPlay(clip); }}
@@ -1870,7 +1889,7 @@ export default function App() {
               <div className="track-id">A1</div>
               <div className="track-content">
                 <div className="waveform-placeholder" />
-                {timeline?.bgmEdits?.map((edit, i) => (
+                {effectiveBgmEdits?.map((edit, i) => (
                   <div
                     key={i}
                     className="bgm-edit-node"
@@ -1930,15 +1949,14 @@ export default function App() {
                       </div>
                     ));
                   })()
-                ) : timeline?.textEdits?.map((edit, i) => {
-                  const tDuration = timeline.totalTimelineDuration || duration;
+                ) : effectiveTextEdits?.map((edit, i) => {
                   return (
                     <div
                       key={i}
                       className="text-edit-node"
                       style={{
-                        left: `${(edit.timelineStart / tDuration) * 100}%`,
-                        width: `${((edit.timelineEnd - edit.timelineStart) / tDuration) * 100}%`,
+                        left: `${(edit.timelineStart / effectiveDuration) * 100}%`,
+                        width: `${((edit.timelineEnd - edit.timelineStart) / effectiveDuration) * 100}%`,
                       }}
                       title={edit.text}
                     >
@@ -1971,15 +1989,14 @@ export default function App() {
                       </div>
                     ));
                   })()
-                ) : timeline?.fadeEdits?.map((edit, i) => {
-                  const tDuration = timeline.totalTimelineDuration || duration;
+                ) : effectiveFadeEdits?.map((edit, i) => {
                   return (
                     <div
                       key={i}
                       className={`fade-edit-node fade-${edit.direction}`}
                       style={{
-                        left: `${(edit.timelineStart / tDuration) * 100}%`,
-                        width: `${((edit.timelineEnd - edit.timelineStart) / tDuration) * 100}%`,
+                        left: `${(edit.start / effectiveDuration) * 100}%`,
+                        width: `${((edit.end - edit.start) / effectiveDuration) * 100}%`,
                       }}
                       title={`淡${edit.direction === "in" ? "入" : "出"}`}
                     >
