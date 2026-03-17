@@ -505,6 +505,16 @@ export default function App() {
     const currentTime = videoRef.current.currentTime;
     latestTimeRef.current = currentTime;
 
+    // 计算当前 timeline 时间
+    const currentTimelineTime = mediaToTimeline(currentTime);
+
+    // 检查是否超过有效时长，如果是则停止音频
+    if (currentTimelineTime >= effectiveDuration - 0.05) {
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+    }
+
     // 动态倍率同步逻辑
     if (effectiveClips && effectiveClips.length) {
       const currentClip = findClipByMediaTime(currentTime);
