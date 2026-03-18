@@ -450,8 +450,29 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         console.log(`[analyze:${requestId}] draft managed by tools`);
       }
     } else if (existingSession) {
-      // 多轮对话：Draft 由 AI 通过工具直接操作，不要重新创建
-      console.log(`[analyze:${requestId}] draft updated via tools in session ${newSessionId}`);
+      // 多轮对话：如果 AI 仍然输出了传统 edits，也需要处理（向后兼容）
+      if (result.features && (result.features.edits?.length > 0 || result.features.segments?.length > 0)) {
+        emitProgress("📝 增量更新草稿...");
+        const videoSource = {
+          name: existingSession.videoInfo.name || "video",
+          path: existingSession.videoInfo.path || "",
+          duration: effectiveDuration,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+        };
+        // 读取现有 Draft，在其基础上增量更新
+        const existingDraft = draftManager.getDraft(newSessionId);
+        const updatedDraft = await aiOutputToDraft(result.features, videoSource, newSessionId, emitProgress, existingDraft);
+        draftManager.updateDraft(newSessionId, {
+          type: "replace_draft",
+          data: { draft: updatedDraft },
+        });
+        console.log(`[analyze:${requestId}] draft incrementally updated (legacy edits in multi-turn)`);
+      } else {
+        // AI 使用了 Draft 工具，Draft 已经在工具执行时更新了
+        console.log(`[analyze:${requestId}] draft updated via tools in session ${newSessionId}`);
+      }
     }
 
     // 记录对话（existing session 已在前面记录了 user，这里只加 assistant）

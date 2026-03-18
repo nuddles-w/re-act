@@ -23,9 +23,38 @@ import { searchAndDownloadBgm } from "../utils/fetchBgm.js";
  * @param {object} videoSource - { name, path, duration, width, height, fps }
  * @param {string} sessionId
  * @param {Function} onProgress - 进度回调
+ * @param {object} existingDraft - 现有 Draft（多轮对话时传入，用于增量更新）
  * @returns {Promise<object>} draft
  */
-export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgress) {
+export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgress, existingDraft = null) {
+  const edits = aiOutput.edits || [];
+  const splitEdits = edits.filter(e => e.type === "split");
+  const speedEdits = edits.filter(e => e.type === "speed");
+  const deleteEdits = edits.filter(e => e.type === "delete");
+  const textEdits = edits.filter(e => e.type === "text");
+  const fadeEdits = edits.filter(e => e.type === "fade");
+  const bgmEdits = edits.filter(e => e.type === "bgm");
+
+  // 多轮对话增量更新：在现有 Draft 基础上操作
+  if (existingDraft && existingDraft.tracks && existingDraft.tracks.length > 0) {
+    const draft = JSON.parse(JSON.stringify(existingDraft));
+    const videoTrack = draft.tracks.find(t => t.type === "video");
+
+    if (videoTrack && videoTrack.segments.length > 0) {
+      // 应用结构性编辑到现有片段
+      deleteEdits.forEach(edit => applyDeleteEditToSegments(videoTrack, edit));
+      speedEdits.forEach(edit => applySpeedEditToSegments(videoTrack, edit));
+      splitEdits.forEach(edit => applySplitEditToSegments(videoTrack, edit));
+    }
+
+    // 增量添加文字、特效、BGM
+    await convertNonStructuralEdits(draft, videoTrack, textEdits, fadeEdits, bgmEdits, sessionId, onProgress);
+    updateDraftDuration(draft);
+    console.log(`[aiToDraft] 增量更新 Draft: ${deleteEdits.length} 删除, ${speedEdits.length} 变速, ${splitEdits.length} 分割, ${textEdits.length} 文字`);
+    return draft;
+  }
+
+  // 首次创建 Draft
   const draft = createEmptyDraft();
 
   // 添加视频源
@@ -34,14 +63,6 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgre
   // 创建视频轨道
   const videoTrack = createTrack(TrackType.VIDEO, "V1");
   draft.tracks.push(videoTrack);
-
-  const edits = aiOutput.edits || [];
-  const speedEdits = edits.filter(e => e.type === "speed");
-  const deleteEdits = edits.filter(e => e.type === "delete");
-  const volumeEdits = edits.filter(e => e.type === "volume" || e.type === "audio");
-  const textEdits = edits.filter(e => e.type === "text");
-  const fadeEdits = edits.filter(e => e.type === "fade");
-  const bgmEdits = edits.filter(e => e.type === "bgm");
 
   // 决定视频片段的构建策略
   const hasStructuralEdits = deleteEdits.length > 0 || speedEdits.length > 0;
@@ -374,6 +395,50 @@ function applyDeleteEditToSegments(videoTrack, deleteEdit) {
     segment.timelineStart = currentTime;
     currentTime += segment.timelineDuration;
   });
+}
+
+/**
+ * 应用分割编辑到视频片段
+ */
+function applySplitEditToSegments(videoTrack, splitEdit) {
+  const splitTime = splitEdit.start;
+  const newSegments = [];
+
+  videoTrack.segments.forEach(segment => {
+    if (splitTime <= segment.sourceStart || splitTime >= segment.sourceEnd) {
+      newSegments.push(segment);
+      return;
+    }
+
+    const rate = segment.playbackRate || 1;
+    const offsetInSource = splitTime - segment.sourceStart;
+    const offsetInTimeline = offsetInSource / rate;
+
+    // 前半段
+    newSegments.push(createVideoSegment({
+      sourceId: segment.sourceId,
+      timelineStart: segment.timelineStart,
+      timelineDuration: offsetInTimeline,
+      sourceStart: segment.sourceStart,
+      sourceEnd: splitTime,
+      playbackRate: rate,
+      volume: segment.volume,
+    }));
+
+    // 后半段
+    newSegments.push(createVideoSegment({
+      sourceId: segment.sourceId,
+      timelineStart: segment.timelineStart + offsetInTimeline,
+      timelineDuration: segment.timelineDuration - offsetInTimeline,
+      sourceStart: splitTime,
+      sourceEnd: segment.sourceEnd,
+      playbackRate: rate,
+      volume: segment.volume,
+    }));
+  });
+
+  videoTrack.segments = newSegments;
+  console.log(`[aiToDraft] applySplitEdit at ${splitTime} → ${newSegments.length} segments`);
 }
 
 /**
