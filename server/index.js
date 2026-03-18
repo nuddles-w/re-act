@@ -440,10 +440,10 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
       if (result.features && (result.features.edits?.length > 0 || result.features.segments?.length > 0)) {
         emitProgress("📝 转换编辑指令为草稿...");
         const draft = await aiOutputToDraft(result.features, videoSource, newSessionId, emitProgress);
-        draftManager.updateDraft(newSessionId, {
+        draftManager.updateDraftWithSnapshot(newSessionId, {
           type: "replace_draft",
           data: { draft },
-        });
+        }, "AI编辑");
         console.log(`[analyze:${requestId}] draft created with ${draft.tracks.length} tracks (legacy mode)`);
       } else {
         // AI 使用了 Draft 工具，Draft 已经在工具执行时更新了
@@ -464,10 +464,10 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
         // 读取现有 Draft，在其基础上增量更新
         const existingDraft = draftManager.getDraft(newSessionId);
         const updatedDraft = await aiOutputToDraft(result.features, videoSource, newSessionId, emitProgress, existingDraft);
-        draftManager.updateDraft(newSessionId, {
+        draftManager.updateDraftWithSnapshot(newSessionId, {
           type: "replace_draft",
           data: { draft: updatedDraft },
-        });
+        }, "AI编辑");
         console.log(`[analyze:${requestId}] draft incrementally updated (legacy edits in multi-turn)`);
       } else {
         // AI 使用了 Draft 工具，Draft 已经在工具执行时更新了
@@ -943,7 +943,7 @@ app.get("/api/draft/:sessionId", (req, res) => {
   }
 });
 
-app.post("/api/update-draft", express.json(), (req, res) => {
+app.post("/api/update-draft", express.json(), async (req, res) => {
   const { sessionId, changes, description } = req.body;
 
   if (!sessionId || !changes) {
@@ -952,8 +952,23 @@ app.post("/api/update-draft", express.json(), (req, res) => {
 
   const draftManager = getDraftManager();
 
+  // split_segment / move_segment 需要走 executeDraftTool（有复杂逻辑）
+  const TOOL_TYPES = new Set(["split_segment", "move_segment"]);
+
   try {
-    const draft = draftManager.updateDraftWithSnapshot(sessionId, changes, description || changes.type);
+    let draft;
+    if (TOOL_TYPES.has(changes.type)) {
+      const { executeDraftTool } = await import("./tools/draftTools.js");
+      const args = changes.type === "split_segment"
+        ? [changes.data.segmentId, changes.data.splitTime]
+        : [changes.data.segmentId, changes.data.newTimelineStart];
+      const result = await executeDraftTool(changes.type, args, sessionId);
+      if (result.error) throw new Error(result.error);
+      draft = draftManager.getDraft(sessionId);
+      console.log(`[index] update-draft via tool: ${changes.type} → ${result.message}`);
+    } else {
+      draft = draftManager.updateDraftWithSnapshot(sessionId, changes, description || changes.type);
+    }
     const undoRedo = draftManager.getUndoRedoState(sessionId);
     console.log(`[index] update-draft: ${changes.type} → canUndo=${undoRedo.canUndo} canRedo=${undoRedo.canRedo}`);
     res.json({ success: true, draft, ...undoRedo });

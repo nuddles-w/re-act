@@ -1,0 +1,69 @@
+[14:16:15.622] [INFO] [analyze] start
+{
+  "name": "2æ12æ¥.mov",
+  "size": 18127869,
+  "duration": 15.766667,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "在当关时间点分割视频",
+  "engine": "auto"
+}
+[14:16:17.287] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-18T06:16:15.619Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "2æ12æ¥.mov",
+      "size": 18127869,
+      "duration": 15.766667,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "在当关时间点分割视频",
+      "engine": "auto"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户要求在特定时间点分割视频，但未指定具体时间点。我需要询问用户要在哪个时间点进行分割。"
+  },
+  {
+    "time": "2026-03-18T06:16:17.287Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-auto",
+      "engine": "auto",
+      "edits": 0
+    }
+  }
+]
+[14:16:17.288] [DATA] [analyze] result.features
+{
+  "summary": "请告诉我您希望在哪个时间点分割视频？",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户要求在特定时间点分割视频，但未指定具体时间点。我需要询问用户要在哪个时间点进行分割。"
+    }
+  ],
+  "performance": {
+    "totalTime": "1.7s",
+    "rounds": 1,
+    "tokensIn": 3712,
+    "tokensOut": 56,
+    "totalTokens": 3768,
+    "cost": "$0.0013",
+    "orchestratorCalls": 1,
+    "videoAnalysisCalls": 0
+  }
+}
+[14:16:17.288] [INFO] [analyze] done
+{
+  "source": "agent-loop-auto",
+  "events": 0,
+  "edits": 0
+}
+[14:16:17.289] [DATA] [analyze] rawResponse
+"{\n  \"thought\": \"用户要求在特定时间点分割视频，但未指定具体时间点。我需要询问用户要在哪个时间点进行分割。\",\n  \"final_answer\": \"请告诉我您希望在哪个时间点分割视频？\"\n}"

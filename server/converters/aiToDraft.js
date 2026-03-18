@@ -93,10 +93,17 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgre
       applySpeedEditToSegments(videoTrack, edit);
     });
 
-    // 应用 volume edits（调整音量）
-    volumeEdits.forEach(edit => {
-      applyVolumeEditToSegments(videoTrack, edit);
+    // 应用 split edits（分割片段）
+    splitEdits.forEach(edit => {
+      applySplitEditToSegments(videoTrack, edit);
     });
+
+    // 应用 volume edits（调整音量）
+    if (volumeEdits && volumeEdits.length > 0) {
+      volumeEdits.forEach(edit => {
+        applyVolumeEditToSegments(videoTrack, edit);
+      });
+    }
   }
 
   // 处理文字和特效（需要 mediaTime → timelineTime 转换）

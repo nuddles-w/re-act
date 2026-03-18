@@ -1,0 +1,77 @@
+[14:45:13.635] [INFO] [analyze] start
+{
+  "name": "2æ12æ¥.mov",
+  "size": 18127869,
+  "duration": 15.766667,
+  "pe": "短视频剪辑产品经理（PE）",
+  "request": "在第 5S 处进行分割",
+  "engine": "auto"
+}
+[14:45:15.602] [DATA] [analyze] debugTimeline
+[
+  {
+    "time": "2026-03-18T06:45:13.632Z",
+    "role": "system",
+    "level": "info",
+    "message": "收到识别请求",
+    "data": {
+      "name": "2æ12æ¥.mov",
+      "size": 18127869,
+      "duration": 15.766667,
+      "pe": "短视频剪辑产品经理（PE）",
+      "request": "在第 5S 处进行分割",
+      "engine": "auto"
+    }
+  },
+  {
+    "round": 1,
+    "thought": "用户要求在视频的第 5 秒处进行分割。我将直接在 edits 中添加一个 split 操作。"
+  },
+  {
+    "time": "2026-03-18T06:45:15.602Z",
+    "role": "system",
+    "level": "info",
+    "message": "识别完成",
+    "data": {
+      "source": "agent-loop-auto",
+      "engine": "auto",
+      "edits": 0
+    }
+  }
+]
+[14:45:15.602] [DATA] [analyze] result.features
+{
+  "duration": 15.766667,
+  "segmentCount": 0,
+  "segments": [],
+  "keyframes": [],
+  "rhythmScore": 0,
+  "events": [],
+  "edits": [],
+  "summary": "已在第 5 秒处进行分割。",
+  "agentSteps": [
+    {
+      "round": 1,
+      "thought": "用户要求在视频的第 5 秒处进行分割。我将直接在 edits 中添加一个 split 操作。"
+    }
+  ],
+  "performance": {
+    "totalTime": "2.0s",
+    "rounds": 1,
+    "tokensIn": 3714,
+    "tokensOut": 102,
+    "totalTokens": 3816,
+    "cost": "$0.0014",
+    "orchestratorCalls": 1,
+    "videoAnalysisCalls": 0
+  }
+}
+[14:45:15.602] [INFO] [analyze] done
+{
+  "source": "agent-loop-auto",
+  "segmentCount": 0,
+  "events": 0,
+  "edits": 0
+}
+[14:45:15.603] [DATA] [analyze] rawResponse
+"{\n  \"thought\": \"用户要求在视频的第 5 秒处进行分割。我将直接在 edits 中添加一个 split 操作。\",\n  \"final_answer\": \"已在第 5 秒处进行分割。\",\n  \"summary\": \"\",\n  \"segments\": [],\n  \"events\": [],\n  \"edits\": [\n    {\n      \"type\": \"split\",\n      \"start\": 5.0\n    }\n  ]\n}"
