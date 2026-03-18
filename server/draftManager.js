@@ -3,30 +3,32 @@
  *
  * 职责：
  * 1. 管理所有会话的 draft 状态
- * 2. 保存历史快照，支持撤销/重做
- * 3. 计算增量变更（diff）
- * 4. 提供 AI 读取接口
+ * 2. 保存历史快照，支持撤销/重做（snapshots + currentIndex）
+ * 3. 批量操作：beginBatch / commitBatch（一次 tool 调用 = 一个快照）
+ * 4. 计算增量变更（diff）
+ * 5. 提供 AI 读取接口
  */
 
 import { createEmptyDraft, updateDraftDuration } from "../src/domain/draftModel.js";
 
+const MAX_SNAPSHOTS = 50;
+
 class DraftManager {
   constructor() {
-    this.drafts = new Map(); // sessionId → draft
-    this.history = new Map(); // sessionId → [snapshots]
-    this.lastReadVersion = new Map(); // sessionId → version (AI 上次读取的版本)
+    this.drafts = new Map();       // sessionId → draft
+    this.snapshots = new Map();    // sessionId → [{ draft, description, timestamp }]
+    this.currentIndex = new Map(); // sessionId → number
+    this.batches = new Map();      // sessionId → { baseDraft, description } | null
+    this.lastReadVersion = new Map(); // sessionId → version
   }
 
   /**
    * 获取草稿
    */
   getDraft(sessionId) {
-    if (!sessionId) {
-      return createEmptyDraft();
-    }
+    if (!sessionId) return createEmptyDraft();
     if (!this.drafts.has(sessionId)) {
       const emptyDraft = createEmptyDraft();
-      // 初始化基础轨道
       emptyDraft.tracks = [
         { id: "V1", type: "video", enabled: true, locked: false, segments: [] },
         { id: "A1", type: "audio", enabled: true, locked: false, segments: [] },
@@ -34,34 +36,164 @@ class DraftManager {
         { id: "FX1", type: "effect", enabled: true, locked: false, segments: [] },
       ];
       this.drafts.set(sessionId, emptyDraft);
+      // 保存初始快照
+      this._initSnapshots(sessionId, emptyDraft);
     }
     return this.drafts.get(sessionId);
   }
 
+  _initSnapshots(sessionId, draft) {
+    if (!this.snapshots.has(sessionId)) {
+      this.snapshots.set(sessionId, [{ draft: JSON.parse(JSON.stringify(draft)), description: "初始状态", timestamp: Date.now() }]);
+      this.currentIndex.set(sessionId, 0);
+    }
+  }
+
   /**
-   * 更新草稿（用户操作触发）
-   * @param {string} sessionId
-   * @param {object} changes - { type, data }
+   * 开始批量操作（一次 tool 调用前调用）
+   * 记录操作前的 draft 状态，后续 updateDraft 不保存快照
+   */
+  beginBatch(sessionId, description) {
+    const draft = this.getDraft(sessionId);
+    this.batches.set(sessionId, {
+      baseDraft: JSON.parse(JSON.stringify(draft)),
+      description: description || "操作",
+    });
+    console.log(`[DraftManager] beginBatch: ${description}`);
+  }
+
+  /**
+   * 提交批量操作（一次 tool 调用后调用）
+   * 将当前 draft 作为一个快照保存
+   */
+  commitBatch(sessionId) {
+    const batch = this.batches.get(sessionId);
+    if (!batch) return;
+
+    const currentDraft = this.getDraft(sessionId);
+    this._pushSnapshot(sessionId, currentDraft, batch.description);
+    this.batches.delete(sessionId);
+    console.log(`[DraftManager] commitBatch: ${batch.description} → snapshot #${this.currentIndex.get(sessionId)}`);
+  }
+
+  /**
+   * 更新草稿（内部变更，不直接保存快照）
+   * 快照由 commitBatch 或 updateDraftWithSnapshot 统一管理
    */
   updateDraft(sessionId, changes) {
     const oldDraft = this.getDraft(sessionId);
-    const newDraft = JSON.parse(JSON.stringify(oldDraft)); // deep clone
+    const newDraft = JSON.parse(JSON.stringify(oldDraft));
 
-    // 应用变更
     this.applyChanges(newDraft, changes);
 
-    // 更新版本和时间
     newDraft.version = (oldDraft.version || 0) + 1;
     newDraft.lastModified = Date.now();
     updateDraftDuration(newDraft);
 
-    // 保存快照
-    this.saveDraftSnapshot(sessionId, oldDraft, newDraft, changes);
-
-    // 更新当前版本
     this.drafts.set(sessionId, newDraft);
-
     return newDraft;
+  }
+
+  /**
+   * 更新草稿并立即保存快照（UI 直接操作时使用）
+   */
+  updateDraftWithSnapshot(sessionId, changes, description) {
+    const draft = this.updateDraft(sessionId, changes);
+    this._pushSnapshot(sessionId, draft, description || changes.type || "UI操作");
+    console.log(`[DraftManager] updateDraftWithSnapshot: ${description} → snapshot #${this.currentIndex.get(sessionId)}`);
+    return draft;
+  }
+
+  /**
+   * 推入新快照（截断 currentIndex 之后的历史）
+   */
+  _pushSnapshot(sessionId, draft, description) {
+    const snapshots = this.snapshots.get(sessionId) || [];
+    const idx = this.currentIndex.get(sessionId) ?? -1;
+
+    // 截断 redo 历史
+    const newSnapshots = snapshots.slice(0, idx + 1);
+    newSnapshots.push({
+      draft: JSON.parse(JSON.stringify(draft)),
+      description,
+      timestamp: Date.now(),
+    });
+
+    // 限制最大快照数
+    if (newSnapshots.length > MAX_SNAPSHOTS) {
+      newSnapshots.shift();
+    }
+
+    this.snapshots.set(sessionId, newSnapshots);
+    this.currentIndex.set(sessionId, newSnapshots.length - 1);
+  }
+
+  /**
+   * 撤销
+   */
+  undo(sessionId) {
+    const snapshots = this.snapshots.get(sessionId) || [];
+    const idx = this.currentIndex.get(sessionId) ?? 0;
+
+    if (idx <= 0) {
+      console.log(`[DraftManager] undo: 已到最早状态`);
+      return { draft: this.getDraft(sessionId), canUndo: false, canRedo: snapshots.length > 1 };
+    }
+
+    const newIdx = idx - 1;
+    this.currentIndex.set(sessionId, newIdx);
+    const snapshot = snapshots[newIdx];
+    const restoredDraft = JSON.parse(JSON.stringify(snapshot.draft));
+    this.drafts.set(sessionId, restoredDraft);
+
+    console.log(`[DraftManager] undo → snapshot #${newIdx} "${snapshot.description}"`);
+    return {
+      draft: restoredDraft,
+      canUndo: newIdx > 0,
+      canRedo: true,
+      description: snapshot.description,
+    };
+  }
+
+  /**
+   * 重做
+   */
+  redo(sessionId) {
+    const snapshots = this.snapshots.get(sessionId) || [];
+    const idx = this.currentIndex.get(sessionId) ?? 0;
+
+    if (idx >= snapshots.length - 1) {
+      console.log(`[DraftManager] redo: 已到最新状态`);
+      return { draft: this.getDraft(sessionId), canUndo: idx > 0, canRedo: false };
+    }
+
+    const newIdx = idx + 1;
+    this.currentIndex.set(sessionId, newIdx);
+    const snapshot = snapshots[newIdx];
+    const restoredDraft = JSON.parse(JSON.stringify(snapshot.draft));
+    this.drafts.set(sessionId, restoredDraft);
+
+    console.log(`[DraftManager] redo → snapshot #${newIdx} "${snapshot.description}"`);
+    return {
+      draft: restoredDraft,
+      canUndo: true,
+      canRedo: newIdx < snapshots.length - 1,
+      description: snapshot.description,
+    };
+  }
+
+  /**
+   * 获取 undo/redo 状态
+   */
+  getUndoRedoState(sessionId) {
+    const snapshots = this.snapshots.get(sessionId) || [];
+    const idx = this.currentIndex.get(sessionId) ?? 0;
+    return {
+      canUndo: idx > 0,
+      canRedo: idx < snapshots.length - 1,
+      historySize: snapshots.length,
+      currentIndex: idx,
+    };
   }
 
   /**
@@ -69,7 +201,6 @@ class DraftManager {
    */
   applyChanges(draft, changes) {
     const { type, data } = changes;
-
     switch (type) {
       case "add_segment":
         this.addSegmentToDraft(draft, data.trackId, data.segment);
@@ -80,6 +211,9 @@ class DraftManager {
       case "delete_segment":
         this.deleteSegmentFromDraft(draft, data.segmentId);
         break;
+      case "split_segment":
+        this.splitSegmentInDraft(draft, data.segmentId, data.splitTime);
+        break;
       case "add_track":
         draft.tracks.push(data.track);
         break;
@@ -87,7 +221,6 @@ class DraftManager {
         draft.tracks = draft.tracks.filter(t => t.id !== data.trackId);
         break;
       case "replace_draft":
-        // 完全替换（AI 首次生成）
         Object.assign(draft, data.draft);
         break;
       default:
@@ -100,19 +233,14 @@ class DraftManager {
    */
   addSegmentToDraft(draft, trackId, segment) {
     const track = draft.tracks.find(t => t.id === trackId);
-    if (!track) {
-      throw new Error(`Track ${trackId} not found`);
-    }
+    if (!track) throw new Error(`Track ${trackId} not found`);
 
-    // 检查时间冲突（同一轨道的视频/音频不能重叠）
     if (track.type === "video" || track.type === "audio") {
       const hasConflict = track.segments.some(s =>
         !(segment.timelineStart >= s.timelineStart + s.timelineDuration ||
           segment.timelineStart + segment.timelineDuration <= s.timelineStart)
       );
-      if (hasConflict) {
-        throw new Error(`Segment overlaps with existing segment in track ${trackId}`);
-      }
+      if (hasConflict) throw new Error(`Segment overlaps with existing segment in track ${trackId}`);
     }
 
     track.segments.push(segment);
@@ -148,20 +276,57 @@ class DraftManager {
   }
 
   /**
+   * 分割 segment（在 mediaTime 处分割）
+   */
+  splitSegmentInDraft(draft, segmentId, splitTime) {
+    for (const track of draft.tracks) {
+      const index = track.segments.findIndex(s => s.id === segmentId);
+      if (index === -1) continue;
+
+      const seg = track.segments[index];
+
+      // splitTime 是 mediaTime，需要在 sourceStart~sourceEnd 范围内
+      if (splitTime <= seg.sourceStart || splitTime >= seg.sourceEnd) {
+        throw new Error(`splitTime ${splitTime} 不在片段范围 ${seg.sourceStart}-${seg.sourceEnd} 内`);
+      }
+
+      const rate = seg.playbackRate || 1;
+      const offsetInSource = splitTime - seg.sourceStart;
+      const offsetInTimeline = offsetInSource / rate;
+
+      // 前半段
+      const seg1 = {
+        ...JSON.parse(JSON.stringify(seg)),
+        id: `${seg.id}-a`,
+        sourceEnd: splitTime,
+        timelineDuration: offsetInTimeline,
+      };
+
+      // 后半段
+      const seg2 = {
+        ...JSON.parse(JSON.stringify(seg)),
+        id: `${seg.id}-b`,
+        sourceStart: splitTime,
+        timelineStart: seg.timelineStart + offsetInTimeline,
+        timelineDuration: seg.timelineDuration - offsetInTimeline,
+      };
+
+      track.segments.splice(index, 1, seg1, seg2);
+      console.log(`[DraftManager] splitSegment: ${segmentId} → ${seg1.id} + ${seg2.id} at ${splitTime}`);
+      return;
+    }
+    throw new Error(`Segment ${segmentId} not found`);
+  }
+
+  /**
    * AI 读取草稿
-   * @param {string} sessionId
-   * @param {boolean} includeHistory - 是否包含历史记录
-   * @returns {object} { draft, version, lastModified, changesSince, history }
    */
   readDraft(sessionId, includeHistory = false) {
     const draft = this.getDraft(sessionId);
     const lastReadVer = this.lastReadVersion.get(sessionId) || 0;
     const currentVer = draft.version || 0;
 
-    // 计算变更
     const changes = this.getChangesSince(sessionId, lastReadVer);
-
-    // 更新读取版本
     this.lastReadVersion.set(sessionId, currentVer);
 
     return {
@@ -169,156 +334,18 @@ class DraftManager {
       version: currentVer,
       lastModified: draft.lastModified,
       changesSince: changes,
-      history: includeHistory ? this.history.get(sessionId) : null,
     };
   }
 
   /**
-   * 获取自指定版本以来的变更
+   * 获取自指定版本以来的变更（基于快照描述）
    */
   getChangesSince(sessionId, fromVersion) {
-    const history = this.history.get(sessionId) || [];
-    const changes = history.filter(h => h.version > fromVersion);
-
-    if (changes.length === 0) {
+    const draft = this.getDraft(sessionId);
+    if ((draft.version || 0) <= fromVersion) {
       return { added: [], modified: [], deleted: [], summary: "" };
     }
-
-    return {
-      added: changes.flatMap(c => c.diff?.added || []),
-      modified: changes.flatMap(c => c.diff?.modified || []),
-      deleted: changes.flatMap(c => c.diff?.deleted || []),
-      summary: this.summarizeChanges(changes),
-    };
-  }
-
-  /**
-   * 生成人类可读的变更摘要
-   */
-  summarizeChanges(changes) {
-    const summary = [];
-
-    changes.forEach(change => {
-      const { type, data } = change.changes;
-
-      if (type === "add_segment") {
-        const seg = data.segment;
-        summary.push(
-          `在 ${data.trackId} 轨道添加了片段 (${seg.timelineStart.toFixed(1)}s-${(seg.timelineStart + seg.timelineDuration).toFixed(1)}s)`
-        );
-      } else if (type === "delete_segment") {
-        summary.push(`删除了片段 ${data.segmentId}`);
-      } else if (type === "modify_segment") {
-        const mods = Object.keys(data.modifications).join(", ");
-        summary.push(`修改了片段 ${data.segmentId}: ${mods}`);
-      } else if (type === "replace_draft") {
-        summary.push("AI 生成了新的剪辑方案");
-      }
-    });
-
-    return summary.join("\n");
-  }
-
-  /**
-   * 保存快照
-   */
-  saveDraftSnapshot(sessionId, oldDraft, newDraft, changes) {
-    const history = this.history.get(sessionId) || [];
-
-    const snapshot = {
-      version: newDraft.version,
-      timestamp: Date.now(),
-      changes,
-      diff: this.computeDiff(oldDraft, newDraft),
-    };
-
-    history.push(snapshot);
-
-    // 只保留最近 20 个快照
-    if (history.length > 20) {
-      history.shift();
-    }
-
-    this.history.set(sessionId, history);
-  }
-
-  /**
-   * 计算 diff
-   */
-  computeDiff(oldDraft, newDraft) {
-    const diff = {
-      added: [],
-      modified: [],
-      deleted: [],
-    };
-
-    // 比较 tracks
-    const oldTrackIds = new Set(oldDraft.tracks.map(t => t.id));
-    const newTrackIds = new Set(newDraft.tracks.map(t => t.id));
-
-    // 新增的 track
-    newTrackIds.forEach(id => {
-      if (!oldTrackIds.has(id)) {
-        diff.added.push({ type: "track", id });
-      }
-    });
-
-    // 删除的 track
-    oldTrackIds.forEach(id => {
-      if (!newTrackIds.has(id)) {
-        diff.deleted.push({ type: "track", id });
-      }
-    });
-
-    // 比较 segments
-    newDraft.tracks.forEach(newTrack => {
-      const oldTrack = oldDraft.tracks.find(t => t.id === newTrack.id);
-      if (!oldTrack) return;
-
-      const oldSegIds = new Set(oldTrack.segments.map(s => s.id));
-      const newSegIds = new Set(newTrack.segments.map(s => s.id));
-
-      // 新增的 segment
-      newSegIds.forEach(id => {
-        if (!oldSegIds.has(id)) {
-          diff.added.push({ type: "segment", trackId: newTrack.id, id });
-        } else {
-          // 检查是否修改
-          const oldSeg = oldTrack.segments.find(s => s.id === id);
-          const newSeg = newTrack.segments.find(s => s.id === id);
-          if (JSON.stringify(oldSeg) !== JSON.stringify(newSeg)) {
-            diff.modified.push({
-              type: "segment",
-              trackId: newTrack.id,
-              id,
-              changes: this.deepDiff(oldSeg, newSeg),
-            });
-          }
-        }
-      });
-
-      // 删除的 segment
-      oldSegIds.forEach(id => {
-        if (!newSegIds.has(id)) {
-          diff.deleted.push({ type: "segment", trackId: newTrack.id, id });
-        }
-      });
-    });
-
-    return diff;
-  }
-
-  /**
-   * 深度 diff（简化版）
-   */
-  deepDiff(oldObj, newObj) {
-    const changes = {};
-    for (const key in newObj) {
-      if (JSON.stringify(oldObj[key]) !== JSON.stringify(newObj[key])) {
-        changes[key] = { old: oldObj[key], new: newObj[key] };
-      }
-    }
-    return changes;
+    return { added: [], modified: [], deleted: [], summary: `Draft 已更新至版本 ${draft.version}` };
   }
 
   /**
@@ -326,12 +353,14 @@ class DraftManager {
    */
   clearSession(sessionId) {
     this.drafts.delete(sessionId);
-    this.history.delete(sessionId);
+    this.snapshots.delete(sessionId);
+    this.currentIndex.delete(sessionId);
+    this.batches.delete(sessionId);
     this.lastReadVersion.delete(sessionId);
   }
 }
 
-// 单例模式
+// 单例
 let draftManagerInstance = null;
 
 export function getDraftManager() {
@@ -341,8 +370,7 @@ export function getDraftManager() {
   return draftManagerInstance;
 }
 
-// 单例
-const draftManager = new DraftManager();
+const draftManager = getDraftManager();
 
 export default draftManager;
 export { DraftManager };

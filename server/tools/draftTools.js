@@ -25,31 +25,53 @@ import { buildDraftContext, buildDraftSummary } from "../utils/draftHelpers.js";
 export async function executeDraftTool(toolName, args, sessionId) {
   const draftManager = getDraftManager();
 
+  // read_draft 不修改 draft，不需要 batch
+  if (toolName === "read_draft") {
+    try {
+      return await executeReadDraft(args, sessionId, draftManager);
+    } catch (error) {
+      console.error(`[draftTools] read_draft error:`, error.message);
+      return { error: error.message };
+    }
+  }
+
+  // 其他工具：beginBatch → 执行 → commitBatch
+  const descriptionMap = {
+    add_segment: "添加片段",
+    modify_segment: "修改片段",
+    delete_segment: "删除片段",
+    split_segment: "分割片段",
+    move_segment: "移动片段",
+  };
+  draftManager.beginBatch(sessionId, descriptionMap[toolName] || toolName);
+
   try {
+    let result;
     switch (toolName) {
-      case "read_draft":
-        return await executeReadDraft(args, sessionId, draftManager);
-
       case "add_segment":
-        return await executeAddSegment(args, sessionId, draftManager);
-
+        result = await executeAddSegment(args, sessionId, draftManager);
+        break;
       case "modify_segment":
-        return await executeModifySegment(args, sessionId, draftManager);
-
+        result = await executeModifySegment(args, sessionId, draftManager);
+        break;
       case "delete_segment":
-        return await executeDeleteSegment(args, sessionId, draftManager);
-
+        result = await executeDeleteSegment(args, sessionId, draftManager);
+        break;
       case "split_segment":
-        return await executeSplitSegment(args, sessionId, draftManager);
-
+        result = await executeSplitSegment(args, sessionId, draftManager);
+        break;
       case "move_segment":
-        return await executeMoveSegment(args, sessionId, draftManager);
-
+        result = await executeMoveSegment(args, sessionId, draftManager);
+        break;
       default:
+        draftManager.batches.delete(sessionId);
         return { error: `Unknown draft tool: ${toolName}` };
     }
+    draftManager.commitBatch(sessionId);
+    return result;
   } catch (error) {
     console.error(`[draftTools] ${toolName} error:`, error.message);
+    draftManager.batches.delete(sessionId); // 失败时清除 batch，不保存快照
     return { error: error.message };
   }
 }

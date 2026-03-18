@@ -44,8 +44,8 @@ export default function App() {
   const [tooltip, setTooltip] = useState({ visible: false, text: "", x: 0, y: 0 });
   const tooltipRafRef = useRef(null);
   const tooltipTargetRef = useRef(null);
-  const undoStackRef = useRef([]);
-  const redoStackRef = useRef([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const activeClipRef = useRef(null);
   const fadeOpacityRef = useRef(1);
   const isDraggingRef = useRef(false);
@@ -100,12 +100,7 @@ export default function App() {
   const [thumbnails, setThumbnails] = useState([]);
   const [thumbnailStatus, setThumbnailStatus] = useState("idle");
   const apiBase = import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
-  // 合并所有编辑（从 Draft 派生 + 手动编辑）
-  const combinedEdits = useMemo(
-    () => [...effectiveTextEdits, ...effectiveFadeEdits, ...manualEdits],
-    [effectiveTextEdits, effectiveFadeEdits, manualEdits]
-  );
-  // 统一获取时长：优先 Draft，其次 Timeline，最后原始视频
+  // 统一获取时长：优先 Draft，最后原始视频
   // 从 Draft 派生所有数据
   const effectiveDuration = useMemo(() => {
     return draft?.settings?.totalDuration || duration;
@@ -202,6 +197,12 @@ export default function App() {
     }));
   }, [draft]);
 
+  // 合并所有编辑（从 Draft 派生 + 手动编辑）
+  const combinedEdits = useMemo(
+    () => [...effectiveTextEdits, ...effectiveFadeEdits, ...manualEdits],
+    [effectiveTextEdits, effectiveFadeEdits, manualEdits]
+  );
+
   const computedFilter = useMemo(() => {
     const parts = [];
     if (colorAdjust.brightness !== 0) parts.push(`brightness(${1 + colorAdjust.brightness})`);
@@ -278,26 +279,30 @@ export default function App() {
       const data = await response.json();
       if (data.success) {
         setDraft(data.draft);
-        console.log("[fetchDraft] Draft loaded:", data.draft);
+        setCanUndo(data.canUndo ?? false);
+        setCanRedo(data.canRedo ?? false);
+        console.log(`[fetchDraft] Draft loaded, canUndo=${data.canUndo} canRedo=${data.canRedo}`);
       }
     } catch (error) {
       console.error("[fetchDraft] Error:", error);
     }
   }, [apiBase]);
 
-  // 更新 Draft（本地修改）
-  const updateDraftLocally = useCallback(async (changes) => {
+  // 更新 Draft（本地修改，自动保存快照）
+  const updateDraftLocally = useCallback(async (changes, description) => {
     if (!sessionId) return;
     try {
       const response = await fetch(`${apiBase}/api/update-draft`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, changes }),
+        body: JSON.stringify({ sessionId, changes, description }),
       });
       const data = await response.json();
       if (data.success) {
         setDraft(data.draft);
-        console.log("[updateDraft] Draft updated:", data.draft);
+        setCanUndo(data.canUndo ?? false);
+        setCanRedo(data.canRedo ?? false);
+        console.log(`[updateDraft] ${changes.type} → canUndo=${data.canUndo} canRedo=${data.canRedo}`);
       }
     } catch (error) {
       console.error("[updateDraft] Error:", error);
@@ -440,8 +445,8 @@ export default function App() {
     setPrepareStatus("idle");
     setManualEdits([]);
     setSessionId(null); // 重置会话 ID
-    undoStackRef.current = [];
-    redoStackRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
 
     // Gemini 预上传：用户选完文件立刻在后台开始压缩+上传
     const eagerEnabled = import.meta.env.VITE_GEMINI_EAGER_UPLOAD === "true";
@@ -774,8 +779,8 @@ export default function App() {
     if (!sessionId) {
       setChatMessages([]);
       setManualEdits([]);
-      undoStackRef.current = [];
-      redoStackRef.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
     }
 
     appendChatMessage({
@@ -929,25 +934,48 @@ export default function App() {
   };
 
   const applyManualEdits = (nextEdits) => {
-    const prev = manualEdits;
-    undoStackRef.current.push({ prev, next: nextEdits });
-    redoStackRef.current = [];
     setManualEdits(nextEdits);
   };
 
-  const handleUndo = () => {
-    const command = undoStackRef.current.pop();
-    if (!command) return;
-    redoStackRef.current.push(command);
-    setManualEdits(command.prev);
-  };
+  const handleUndo = useCallback(async () => {
+    if (!sessionId || !canUndo) return;
+    try {
+      const response = await fetch(`${apiBase}/api/undo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setDraft(data.draft);
+        setCanUndo(data.canUndo ?? false);
+        setCanRedo(data.canRedo ?? false);
+        console.log(`[undo] → canUndo=${data.canUndo} canRedo=${data.canRedo}`);
+      }
+    } catch (error) {
+      console.error("[undo] Error:", error);
+    }
+  }, [sessionId, canUndo, apiBase]);
 
-  const handleRedo = () => {
-    const command = redoStackRef.current.pop();
-    if (!command) return;
-    undoStackRef.current.push(command);
-    setManualEdits(command.next);
-  };
+  const handleRedo = useCallback(async () => {
+    if (!sessionId || !canRedo) return;
+    try {
+      const response = await fetch(`${apiBase}/api/redo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setDraft(data.draft);
+        setCanUndo(data.canUndo ?? false);
+        setCanRedo(data.canRedo ?? false);
+        console.log(`[redo] → canUndo=${data.canUndo} canRedo=${data.canRedo}`);
+      }
+    } catch (error) {
+      console.error("[redo] Error:", error);
+    }
+  }, [sessionId, canRedo, apiBase]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -1020,131 +1048,91 @@ export default function App() {
     applyManualEdits(nextEdits);
   };
 
-  const addSplit = () => {
-    if (!videoRef.current) return;
-    const time = normalizeTime(videoRef.current.currentTime || 0);
-    if (!time) return;
-    applyManualEdits([...manualEdits, { type: "split", start: time, end: time }]);
+  const addSplit = async () => {
+    if (!videoRef.current || !sessionId) return;
+    const mediaTime = videoRef.current.currentTime;
+    const clip = findClipByMediaTime(mediaTime);
+    if (!clip) return;
+
+    console.log(`[addSplit] 在 mediaTime=${mediaTime.toFixed(2)} 分割片段 ${clip.id}`);
+    await updateDraftLocally({ type: "split_segment", data: { segmentId: clip.id, splitTime: mediaTime } }, "分割片段");
   };
 
-  const deleteClip = () => {
+  const deleteClip = async () => {
     const clip = getActiveClip();
-    if (!clip) return;
-    const nextEdit = {
-      type: "delete",
-      start: normalizeTime(clip.start),
-      end: normalizeTime(clip.end),
-    };
-    const nextEdits = replaceEdit(
-      manualEdits,
-      (e) =>
-        e.type === "delete" &&
-        Math.abs(e.start - nextEdit.start) < 0.02 &&
-        Math.abs(e.end - nextEdit.end) < 0.02,
-      nextEdit
-    );
-    applyManualEdits(nextEdits);
+    if (!clip || !sessionId) return;
+
+    console.log(`[deleteClip] 删除片段 ${clip.id}`);
+    await updateDraftLocally({ type: "delete_segment", data: { segmentId: clip.id } }, "删除片段");
   };
 
-  const trimClip = (direction) => {
+  const trimClip = async (direction) => {
     const clip = getActiveClip();
-    if (!clip) return;
+    if (!clip || !sessionId) return;
     const span = Math.max(0.3, Math.min(1, (clip.end - clip.start) * 0.2));
-    let start = clip.start;
-    let end = clip.end;
+    let newSourceStart = clip.sourceStart;
+    let newSourceEnd = clip.sourceEnd;
     if (direction === "in") {
-      end = Math.min(clip.end, clip.start + span);
+      newSourceEnd = Math.min(clip.sourceEnd, clip.sourceStart + span);
     } else {
-      start = Math.max(clip.start, clip.end - span);
+      newSourceStart = Math.max(clip.sourceStart, clip.sourceEnd - span);
     }
-    if (end - start <= 0.05) return;
-    const nextEdit = {
-      type: "delete",
-      start: normalizeTime(start),
-      end: normalizeTime(end),
-    };
-    const nextEdits = replaceEdit(
-      manualEdits,
-      (e) =>
-        e.type === "delete" &&
-        Math.abs(e.start - nextEdit.start) < 0.02 &&
-        Math.abs(e.end - nextEdit.end) < 0.02,
-      nextEdit
-    );
-    applyManualEdits(nextEdits);
+    if (newSourceEnd - newSourceStart <= 0.05) return;
+
+    console.log(`[trimClip] 修剪片段 ${clip.id} direction=${direction}`);
+    await updateDraftLocally({
+      type: "modify_segment",
+      data: { segmentId: clip.id, modifications: { sourceStart: newSourceStart, sourceEnd: newSourceEnd, timelineDuration: (newSourceEnd - newSourceStart) / (clip.playbackRate || 1) } },
+    }, "修剪片段");
   };
 
-  const addFade = (mode) => {
+  const addFade = async (mode) => {
     const clip = getActiveClip();
-    if (!clip) return;
+    if (!clip || !sessionId) return;
     const window = Math.min(0.6, clip.end - clip.start);
     if (window <= 0.05) return;
-    const start = mode === "in" ? clip.start : clip.end - window;
-    const end = mode === "in" ? clip.start + window : clip.end;
-    const nextEdit = {
-      type: "fade",
-      start: normalizeTime(start),
-      end: normalizeTime(end),
-      mode,
-    };
-    const nextEdits = replaceEdit(
-      manualEdits,
-      (e) =>
-        e.type === "fade" &&
-        e.mode === mode &&
-        Math.abs(e.start - nextEdit.start) < 0.02 &&
-        Math.abs(e.end - nextEdit.end) < 0.02,
-      nextEdit
-    );
-    applyManualEdits(nextEdits);
+    const start = mode === "in" ? clip.timelineStart : clip.timelineStart + clip.displayDuration - window;
+    const end = start + window;
+
+    console.log(`[addFade] 添加淡${mode === "in" ? "入" : "出"} ${start.toFixed(2)}-${end.toFixed(2)}`);
+    await updateDraftLocally({
+      type: "add_segment",
+      data: {
+        trackId: "FX1",
+        segment: {
+          type: "fade",
+          effectType: "fade",
+          direction: mode,
+          timelineStart: start,
+          timelineDuration: window,
+          targetTrack: "V1",
+        },
+      },
+    }, `淡${mode === "in" ? "入" : "出"}`);
   };
 
-  const updateVolume = (volume) => {
+  const updateVolume = async (volume) => {
     const clip = getActiveClip();
-    if (!clip) return;
-    const nextEdit = {
-      type: "volume",
-      start: normalizeTime(clip.start),
-      end: normalizeTime(clip.end),
-      volume: Math.min(1, Math.max(0, volume)),
-    };
-    const nextEdits = replaceEdit(
-      manualEdits,
-      (e) =>
-        e.type === "volume" &&
-        Math.abs(e.start - nextEdit.start) < 0.02 &&
-        Math.abs(e.end - nextEdit.end) < 0.02,
-      nextEdit
-    );
-    applyManualEdits(nextEdits);
+    if (!clip || !sessionId) return;
+
+    console.log(`[updateVolume] 修改片段 ${clip.id} volume=${volume}`);
+    await updateDraftLocally({
+      type: "modify_segment",
+      data: { segmentId: clip.id, modifications: { volume: Math.min(1, Math.max(0, volume)) } },
+    }, "调整音量");
   };
 
-  const updateTransform = (updater) => {
+  const updateTransform = async (updater) => {
     const clip = getActiveClip();
-    if (!clip) return;
-    const existing = manualEdits.find(
-      (e) =>
-        e.type === "transform" &&
-        Math.abs(e.start - clip.start) < 0.02 &&
-        Math.abs(e.end - clip.end) < 0.02
-    );
-    const base = existing?.transform || {};
-    const nextTransform = updater(base);
-    const nextEdit = {
-      type: "transform",
-      start: normalizeTime(clip.start),
-      end: normalizeTime(clip.end),
-      transform: nextTransform,
-    };
-    const nextEdits = replaceEdit(
-      manualEdits,
-      (e) =>
-        e.type === "transform" &&
-        Math.abs(e.start - nextEdit.start) < 0.02 &&
-        Math.abs(e.end - nextEdit.end) < 0.02,
-      nextEdit
-    );
-    applyManualEdits(nextEdits);
+    if (!clip || !sessionId) return;
+    const existing = clip.transform || {};
+    const nextTransform = updater(existing);
+
+    console.log(`[updateTransform] 修改片段 ${clip.id} transform`);
+    await updateDraftLocally({
+      type: "modify_segment",
+      data: { segmentId: clip.id, modifications: { transform: nextTransform } },
+    }, "变换");
   };
 
   const zoomClip = (delta) => {
@@ -1255,7 +1243,7 @@ export default function App() {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [timeline, duration, timelineScale, manualEdits]);
+  }, [draft, duration, timelineScale, manualEdits]);
 
   const cropSquare = () => {
     const el = videoRef.current;
@@ -1705,8 +1693,8 @@ export default function App() {
       <footer className="editor-timeline">
         <div className="timeline-toolbar">
           <div className="toolbar-left" onMouseMove={handleToolbarMouseMove} onMouseLeave={handleToolbarMouseLeave}>
-            <button className="tool-btn" onClick={handleUndo} data-tooltip="Undo (⌘Z)" title="Undo (⌘Z)">↶</button>
-            <button className="tool-btn" onClick={handleRedo} data-tooltip="Redo (⇧⌘Z)" title="Redo (⇧⌘Z)">↷</button>
+            <button className="tool-btn" onClick={handleUndo} disabled={!canUndo} data-tooltip="Undo (⌘Z)" title="Undo (⌘Z)">↶</button>
+            <button className="tool-btn" onClick={handleRedo} disabled={!canRedo} data-tooltip="Redo (⇧⌘Z)" title="Redo (⇧⌘Z)">↷</button>
             <button className="tool-btn" onClick={addSplit} data-tooltip="Split" title="Split">✂️</button>
             <button className="tool-btn" onClick={deleteClip} data-tooltip="Delete" title="Delete">🗑️</button>
             <button className="tool-btn" onClick={() => trimClip("in")} data-tooltip="Trim In" title="Trim In">⏮️</button>

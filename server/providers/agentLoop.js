@@ -283,6 +283,12 @@ export async function runAgentLoop({
 
   // 超过最大轮数，尝试解析最后一次响应
   console.warn("[agentLoop] max rounds reached, parsing last response");
+  // 清理可能悬挂的 batch
+  const draftManager = getDraftManager();
+  if (draftManager.batches.has(sessionId)) {
+    draftManager.batches.delete(sessionId);
+    console.warn(`[agentLoop] cleared dangling batch for session ${sessionId}`);
+  }
   const features = parseFeatures(lastResponseText || "{}", duration);
   return {
     source: "agent-loop-timeout",

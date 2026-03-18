@@ -296,15 +296,6 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     logger.info("analyze", "start", { name: videoFile?.originalname, size: videoFile?.size, duration, pe, request, engine });
     emitProgress("🎬 收到请求，开始 ReAct 推理...");
 
-    const video = videoFile ? {
-      name: videoFile.originalname,
-      size: videoFile.size,
-      mimeType: videoFile.mimetype,
-      buffer: videoFile.buffer,
-      path: videoFile.path,
-      duration,
-    } : null;
-
     // 已有会话：取历史、编辑状态、缓存的 fileUri
     const conversationHistory = existingSession ? getConversationHistory(sessionId) : [];
     const conversationSummary = existingSession ? getConversationSummary(sessionId) : null;
@@ -312,6 +303,33 @@ app.post("/api/analyze", upload.single("video"), async (req, res) => {
     const cachedFileUri = existingSession?.analysisResult?.fileUri ?? null;
     const cachedMimeType = existingSession?.analysisResult?.fileMimeType ?? null;
     const effectiveDuration = existingSession ? existingSession.videoInfo.duration : duration;
+
+    // 多轮对话且没有 cachedFileUri 时，尝试从磁盘重新加载视频文件
+    let video = videoFile ? {
+      name: videoFile.originalname,
+      size: videoFile.size,
+      mimeType: videoFile.mimetype,
+      buffer: videoFile.buffer,
+      path: videoFile.path,
+      duration: effectiveDuration,
+    } : null;
+
+    if (!video && existingSession && !cachedFileUri) {
+      const savedPath = existingSession.videoInfo.path;
+      if (savedPath && fs.existsSync(savedPath)) {
+        console.log(`[analyze:${requestId}] 从磁盘重新加载视频: ${savedPath}`);
+        emitProgress("📂 重新加载视频文件...");
+        video = {
+          name: existingSession.videoInfo.name,
+          size: existingSession.videoInfo.size,
+          mimeType: "video/mp4",
+          path: savedPath,
+          duration: effectiveDuration,
+        };
+      } else {
+        console.warn(`[analyze:${requestId}] 无法找到视频文件: ${savedPath}`);
+      }
+    }
 
     let result;
     let usedEngine = engine;
@@ -897,14 +915,15 @@ app.get("/api/draft/:sessionId", (req, res) => {
 
   try {
     const draft = draftManager.getDraft(sessionId);
-    res.json({ success: true, draft });
+    const undoRedo = draftManager.getUndoRedoState(sessionId);
+    res.json({ success: true, draft, ...undoRedo });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 app.post("/api/update-draft", express.json(), (req, res) => {
-  const { sessionId, changes } = req.body;
+  const { sessionId, changes, description } = req.body;
 
   if (!sessionId || !changes) {
     return res.status(400).json({ success: false, error: "Missing sessionId or changes" });
@@ -913,8 +932,38 @@ app.post("/api/update-draft", express.json(), (req, res) => {
   const draftManager = getDraftManager();
 
   try {
-    const draft = draftManager.updateDraft(sessionId, changes);
-    res.json({ success: true, draft });
+    const draft = draftManager.updateDraftWithSnapshot(sessionId, changes, description || changes.type);
+    const undoRedo = draftManager.getUndoRedoState(sessionId);
+    console.log(`[index] update-draft: ${changes.type} → canUndo=${undoRedo.canUndo} canRedo=${undoRedo.canRedo}`);
+    res.json({ success: true, draft, ...undoRedo });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/undo", express.json(), (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) return res.status(400).json({ success: false, error: "Missing sessionId" });
+
+  const draftManager = getDraftManager();
+  try {
+    const result = draftManager.undo(sessionId);
+    console.log(`[index] undo → canUndo=${result.canUndo} canRedo=${result.canRedo}`);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post("/api/redo", express.json(), (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) return res.status(400).json({ success: false, error: "Missing sessionId" });
+
+  const draftManager = getDraftManager();
+  try {
+    const result = draftManager.redo(sessionId);
+    console.log(`[index] redo → canUndo=${result.canUndo} canRedo=${result.canRedo}`);
+    res.json({ success: true, ...result });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

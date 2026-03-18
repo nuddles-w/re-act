@@ -56,6 +56,37 @@ After editing JS files that contain template literals, verify there are no unesc
    - ❌ 日志信息过于简单（如只输出 "done"）
    - ❌ 输出完整的大对象导致日志难以阅读
 
+## 测试规范（每次大改动后必须执行）
+
+```bash
+npm test
+```
+
+所有测试必须 100% 通过才能提交。测试文件位于 `server/tests/`，使用 Node.js 原生 `node --test`。
+
+**测试文件说明：**
+
+| 文件 | 覆盖范围 |
+|---|---|
+| `draftManager.test.js` | undo/redo 核心逻辑：快照保存、batch 原子性、undo/redo 指针、redo 历史截断 |
+| `regression.test.js` | 项目基础功能回归：DraftManager CRUD、draftToTimeline 转换、多轨道完整性、多轮对话增量更新 |
+| `parseFeatures.test.js` | AI 输出解析：segments、events、edits、时间格式 |
+| `applyEditsToTimeline.test.js` | 编辑应用：delete/speed/split/text/fade |
+| `exportFilterComplex.test.js` | FFmpeg filter_complex 生成 |
+
+**必须通过的关键 case（回归测试核心）：**
+
+1. `getDraft 初始化包含 V1/A1/T1/FX1 四条轨道` — 基础轨道结构不能被破坏
+2. `多轮对话：第二轮操作不覆盖第一轮的片段` — 增量更新范式核心约束
+3. `draftToTimeline: 视频片段正确转换为 clips` — 前端渲染依赖此转换
+4. `split_segment 批量操作：一次 batch = 一个快照` — undo 粒度正确性
+5. `undo 后新操作截断 redo 历史` — undo/redo 线性历史一致性
+6. `add_segment 重叠时抛出错误` — 时间轴完整性保护
+
+**新增测试的时机：**
+- 新增核心模块时，同步新增对应测试文件
+- 修复 bug 时，先写能复现 bug 的测试，再修复
+
 ## Development
 
 Two processes must run simultaneously:
