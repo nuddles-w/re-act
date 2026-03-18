@@ -333,3 +333,53 @@ test("split_segment 批量操作：一次 batch = 一个快照", () => {
   assert.equal(v1.segments.length, 1, "undo split 后应恢复为一个片段");
   assert.equal(v1.segments[0].id, "v1");
 });
+
+// ── 6. aiOutputToDraft 端到端 ────────────────────────────────────────
+
+import { aiOutputToDraft } from "../converters/aiToDraft.js";
+
+const videoSource = { name: "test.mp4", path: "/tmp/test.mp4", duration: 15, width: 1920, height: 1080, fps: 30 };
+
+test("aiOutputToDraft: 首次创建包含完整视频片段", async () => {
+  const draft = await aiOutputToDraft({ segments: [], edits: [], summary: "" }, videoSource, "s1", null);
+  const v1 = draft.tracks.find(t => t.id === "V1");
+  assert.ok(v1, "应有 V1 轨道");
+  assert.equal(v1.segments.length, 1, "应有一个完整视频片段");
+  assert.equal(v1.segments[0].sourceStart, 0);
+  assert.equal(v1.segments[0].sourceEnd, 15);
+});
+
+test("aiOutputToDraft: 多轮对话 split 增量更新", async () => {
+  const draft1 = await aiOutputToDraft({ segments: [], edits: [], summary: "" }, videoSource, "s1", null);
+  const draft2 = await aiOutputToDraft(
+    { segments: [], edits: [{ type: "split", start: 5.0 }], summary: "" },
+    videoSource, "s1", null, draft1
+  );
+  const v1 = draft2.tracks.find(t => t.id === "V1");
+  assert.equal(v1.segments.length, 2, "split 后应有 2 个片段");
+  assert.equal(v1.segments[0].sourceEnd, 5);
+  assert.equal(v1.segments[1].sourceStart, 5);
+});
+
+test("aiOutputToDraft: 多轮对话 delete 增量更新", async () => {
+  const draft1 = await aiOutputToDraft({ segments: [], edits: [], summary: "" }, videoSource, "s1", null);
+  const draft2 = await aiOutputToDraft(
+    { segments: [], edits: [{ type: "delete", start: 5.0, end: 10.0 }], summary: "" },
+    videoSource, "s1", null, draft1
+  );
+  const v1 = draft2.tracks.find(t => t.id === "V1");
+  assert.equal(v1.segments.length, 2, "delete 后应有 2 个片段（前后各一段）");
+});
+
+test("aiOutputToDraft: 多轮对话不覆盖已有文字片段", async () => {
+  const draft1 = await aiOutputToDraft(
+    { segments: [], edits: [{ type: "text", start: 0, end: 5, text: "标题", position: "bottom" }], summary: "" },
+    videoSource, "s1", null
+  );
+  const draft2 = await aiOutputToDraft(
+    { segments: [], edits: [{ type: "split", start: 5.0 }], summary: "" },
+    videoSource, "s1", null, draft1
+  );
+  const t1 = draft2.tracks.find(t => t.type === "text");
+  assert.ok(t1 && t1.segments.length > 0, "第一轮的文字片段应保留");
+});
