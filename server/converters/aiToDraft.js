@@ -31,6 +31,7 @@ export async function aiOutputToDraft(aiOutput, videoSource, sessionId, onProgre
   const splitEdits = edits.filter(e => e.type === "split");
   const speedEdits = edits.filter(e => e.type === "speed");
   const deleteEdits = edits.filter(e => e.type === "delete");
+  const volumeEdits = edits.filter(e => e.type === "volume" || e.type === "audio");
   const textEdits = edits.filter(e => e.type === "text");
   const fadeEdits = edits.filter(e => e.type === "fade");
   const bgmEdits = edits.filter(e => e.type === "bgm");
